@@ -1,7 +1,5 @@
 # ninja log v6
-9	551	7396188314025725	src/CMakeFiles/SimpleFileSystem.dir/FileSystem.cpp.obj	7b1449a5c6f07269
+5	397	7396189549896827	src/CMakeFiles/SimpleFileSystem.dir/FileSystem.cpp.obj	7b1449a5c6f07269
 1	553	7396188313942807	src/CMakeFiles/SimpleFileSystem.dir/main.cpp.obj	98db373dc13d3b3c
 6	583	7396188313995727	src/CMakeFiles/SimpleFileSystem.dir/VirtualDisk.cpp.obj	a5823075b3b949c0
-583	876	7396188319760935	src/SimpleFileSystem.exe	aad5ad464905ca1b
-5	397	7396189549896827	src/CMakeFiles/SimpleFileSystem.dir/FileSystem.cpp.obj	7b1449a5c6f07269
 397	535	7396189553823564	src/SimpleFileSystem.exe	aad5ad464905ca1b

@@ -1,7 +1,6 @@
 # Define the source files
 set(SOURCES
         main.cpp
-        VirtualDisk.cpp
         FileSystem.cpp
 )
 
