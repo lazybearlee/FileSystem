@@ -3,6 +3,7 @@
 #include "FileSystem.h"
 
 int main() {
+    std::cout << "Welcome to the file system!" << std::endl;
     FileSystem fs;
     std::string input;
 
@@ -15,8 +16,8 @@ int main() {
 
         if (command == "exit") {
             fs.save();
-            break;
-        } else if (command == "new") {
+        }
+        if (command == "new") {
             std::string systemName;
             iss >> systemName;
             if (systemName.empty()) {
@@ -32,10 +33,14 @@ int main() {
                 continue;
             }
             fs.load(filename);
-        } else {
+        }
+        else if (command == "super")
+        {
+            fs.printSuperBlock();
+        }
+        else {
             fs.execute(input);
         }
     }
-
     return 0;
 }

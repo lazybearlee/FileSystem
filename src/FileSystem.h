@@ -4,15 +4,33 @@
 #ifndef FILESYSTEM_H
 #define FILESYSTEM_H
 
+#include <bitset>
+#include <fstream>
 #include <string>
+// 如果是Windows系统
+#ifdef _WIN32
+#include <windows.h>
+#else
+// 如果是Linux系统
+#include <unistd.h>
+#endif
+
 
 /* 定义常量 */
-#define MAX_BLOCK_SIZE 512
+// 超级块大小
+#define BLOCK_SIZE 512
+// inode节点大小
 #define INODE_SIZE 128
+// 目录项名称最大长度
 #define MAX_DIRITEM_NAME_LEN 28
-
-#define MAX_BLOCK_NUM 4294967295
-#define MAX_INODE_NUM 65535
+// 虚拟磁盘大小，即32MB
+#define MAX_DISK_SIZE (3200*1000)
+// BLOCK数目，暂定为1024
+#define BLOCK_NUM 1024
+// inode节点数目，暂定为512
+#define MAX_INODE_NUM 512
+// 每个块组的块数
+#define BLOCK_GROUP_SIZE 32
 #define FREE_BLOCK_STACK_SIZE 64
 
 /* 文件/目录属性定义 */
@@ -43,6 +61,34 @@
 // 默认权限：目录，即本用户有读写执行权限，其他用户和组用户有读和执行权限
 #define DEFAULT_DIR_MODE 0755
 
+/* 用户 */
+// 用户名最大长度
+#define MAX_USER_NAME_LEN 20
+// 用户组名最大长度
+#define MAX_GROUP_NAME_LEN 20
+// 用户密码最大长度
+#define MAX_PASSWORD_LEN 20
+// 用户状态
+#define MAX_USER_STATE 1
+// 主机名最大长度
+#define MAX_HOST_NAME_LEN 32
+
+/* 全局变量 */
+// 超级块开始位置
+const int superBlockStartPos = 0;
+// inode位图开始位置
+const int iNodeBitmapStartPos = 1 * BLOCK_SIZE;
+// 数据块位图开始位置
+const int blockBitmapStartPos = iNodeBitmapStartPos + 2 * BLOCK_SIZE;
+// inode节点开始位置,占 INODE_NUM/(BLOCK_SIZE/INODE_SIZE) 个磁盘块
+const int iNodeStartPos = blockBitmapStartPos + 20 * BLOCK_SIZE;
+// 数据块开始位置
+const int blockStartPos = iNodeStartPos + (MAX_INODE_NUM * INODE_SIZE) / BLOCK_SIZE + 1;
+// 虚拟磁盘文件大小
+const int diskBlockSize = blockStartPos + BLOCK_NUM * BLOCK_SIZE;
+// 单个文件最大大小
+const int maxFileSize = 10 * BLOCK_SIZE + BLOCK_SIZE/sizeof(int) * BLOCK_SIZE + BLOCK_SIZE/sizeof(int) * BLOCK_SIZE * BLOCK_SIZE/sizeof(int);
+
 /* 数据结构定义 */
 
 /**
@@ -60,12 +106,14 @@ struct SuperBlock {
     unsigned int freeBlockNum;
 
     /* 空闲块堆栈 */
+
     // 空闲块堆栈
-    int freeBlockStack[FREE_BLOCK_STACK_SIZE];
+    int freeBlockStack[BLOCK_GROUP_SIZE];
     // 堆栈顶指针
-    int stackTop;
+    int freeBlockAddr;
 
     /* 大小 */
+
     // 磁盘块大小
     unsigned short blockSize;
     // inode节点大小
@@ -76,6 +124,7 @@ struct SuperBlock {
     unsigned short blockGroupSize;
 
     /* 磁盘分布（各个区块在虚拟磁盘中的位置） */
+
     // 超级块位置
     int superBlockPos;
     // inode位图位置
@@ -100,9 +149,9 @@ struct INode
     // 链接数
     unsigned short iNodeLink;
     // 文件所有者，字符串
-    char iNodeOwner[10];
+    char iNodeOwner[MAX_USER_NAME_LEN];
     // 文件所属组，字符串
-    char iNodeGroup[10];
+    char iNodeGroup[MAX_GROUP_NAME_LEN];
     // 文件大小
     unsigned int iNodeSize;
     // 文件创建时间，时间戳
@@ -122,19 +171,77 @@ struct DirItem
 {
     // 目录项名
     char itemName[MAX_DIRITEM_NAME_LEN];
-    // inode节点号
-    unsigned short iNodeNum;
+    // inode地址
+    int iNodeAddr;
 };
 
+/**
+ * 用户状态
+ */
+struct UserState
+{
+    // 是否已经登录
+    bool isLogin;
+    // 用户名
+    char userName[MAX_USER_NAME_LEN];
+    // 用户所在组
+    char userGroup[MAX_GROUP_NAME_LEN];
+    // 用户密码
+    char userPassword[MAX_PASSWORD_LEN];
+    // 用户ID
+    unsigned short userID;
+    // 用户组ID
+    unsigned short userGroupID;
+};
 
 class FileSystem {
 public:
+    // 构造函数
+    FileSystem();
+    void getHostName();
+    int allocateINode();
+    bool freeINode(int iNodeAddr);
+    int allocateBlock();
+    bool freeBlock(int blockAddr);
+    bool formatFileSystem();
+    void initSystemConfig();
     void create(const std::string &systemName);
+    bool installFileSystem();
     void load(const std::string &filename);
     void save();
     void execute(const std::string &command);
+    void printSuperBlock();
+
 private:
-    // 虚拟磁盘读
+    /*-------------------系统-------------------*/
+    // 虚拟磁盘缓冲区，初始为最大缓冲区大小
+    static char diskBuffer[MAX_DISK_SIZE];
+    // 读系统文件的指针
+    std::ifstream fr;
+    // 写系统文件的指针
+    std::ofstream fw;
+    // 超级块
+    SuperBlock superBlock;
+    // inode位图
+    std::bitset<MAX_INODE_NUM> iNodeBitmap;
+    // 数据块位图
+    std::bitset<BLOCK_NUM> blockBitmap;
+
+    /*-------------------用户-------------------*/
+    // 用户状态
+    UserState userState;
+    // 当前目录
+    int currentDir;
+    // 当前目录名
+    char currentDirName[8*MAX_DIRITEM_NAME_LEN];
+    // 当前主机名
+    char hostName[MAX_HOST_NAME_LEN];
+    // 根目录inode节点
+    int rootINodeAddr;
+    // 下一个要被分配的用户标识
+    int nextUserID;
+    // 下一个要被分配的组标识
+    int nextGroupID;
 
 };
 

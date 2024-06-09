@@ -1,5 +1,16 @@
 # ninja log v6
-5	397	7396189549896827	src/CMakeFiles/SimpleFileSystem.dir/FileSystem.cpp.obj	7b1449a5c6f07269
-1	553	7396188313942807	src/CMakeFiles/SimpleFileSystem.dir/main.cpp.obj	98db373dc13d3b3c
+6	2197	7396450014790515	src/CMakeFiles/SimpleFileSystem.dir/FileSystem.cpp.obj	7b1449a5c6f07269
+6	1900	7396451282607192	src/CMakeFiles/SimpleFileSystem.dir/main.cpp.obj	98db373dc13d3b3c
 6	583	7396188313995727	src/CMakeFiles/SimpleFileSystem.dir/VirtualDisk.cpp.obj	a5823075b3b949c0
-397	535	7396189553823564	src/SimpleFileSystem.exe	aad5ad464905ca1b
+1901	2057	7396451301556517	src/SimpleFileSystem.exe	1491368bf299acf2
+7	1864	7396452002087069	src/CMakeFiles/SimpleFileSystem.dir/main.cpp.obj	98db373dc13d3b3c
+1865	2001	7396452020663902	src/SimpleFileSystem.exe	1491368bf299acf2
+6	551	7396452780587311	src/CMakeFiles/SimpleFileSystem.dir/main.cpp.obj	98db373dc13d3b3c
+14	635	7396452780663919	src/CMakeFiles/SimpleFileSystem.dir/FileSystem.cpp.obj	7b1449a5c6f07269
+635	765	7396452786874675	src/SimpleFileSystem.exe	1491368bf299acf2
+6	1911	7396453428073205	src/CMakeFiles/SimpleFileSystem.dir/main.cpp.obj	98db373dc13d3b3c
+14	1960	7396453428150171	src/CMakeFiles/SimpleFileSystem.dir/FileSystem.cpp.obj	7b1449a5c6f07269
+1960	2093	7396453447610587	src/SimpleFileSystem.exe	1491368bf299acf2
+6	1917	7396454467147236	src/CMakeFiles/SimpleFileSystem.dir/main.cpp.obj	98db373dc13d3b3c
+14	1945	7396454467224037	src/CMakeFiles/SimpleFileSystem.dir/FileSystem.cpp.obj	7b1449a5c6f07269
+1945	2077	7396454486543308	src/SimpleFileSystem.exe	1491368bf299acf2
