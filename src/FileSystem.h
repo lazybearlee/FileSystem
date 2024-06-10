@@ -5,6 +5,7 @@
 #define FILESYSTEM_H
 
 #include <bitset>
+#include <FSHelper.h>
 #include <fstream>
 #include <string>
 // 如果是Windows系统
@@ -17,10 +18,18 @@
 
 
 /* 定义常量 */
-// 超级块大小
+// 版本号
+#define VERSION "1.0"
+// 作者
+#define AUTHOR "Li Zhuo"
+// 邮箱
+#define EMAIL "Lz1958455046@outlook.com or 1120211231@bit.edu.cn"
+// 数据块大小
 #define BLOCK_SIZE 512
 // inode节点大小
 #define INODE_SIZE 128
+// 数据块指针数目
+#define BLOCK_POINTER_NUM 12
 // 目录项名称最大长度
 #define MAX_DIRITEM_NAME_LEN 28
 // 虚拟磁盘大小，即32MB
@@ -73,21 +82,25 @@
 // 主机名最大长度
 #define MAX_HOST_NAME_LEN 32
 
+/* 命令 */
+#define LS_DEFAULT 0
+#define LS_L 1
+
 /* 全局变量 */
-// 超级块开始位置
+// 超级块开始位置,占一个磁盘块
 const int superBlockStartPos = 0;
-// inode位图开始位置
+// inode位图开始位置,位图占两个磁盘块
 const int iNodeBitmapStartPos = 1 * BLOCK_SIZE;
-// 数据块位图开始位置
+// 数据块位图开始位置，数据块位图占20个磁盘块
 const int blockBitmapStartPos = iNodeBitmapStartPos + 2 * BLOCK_SIZE;
-// inode节点开始位置,占 INODE_NUM/(BLOCK_SIZE/INODE_SIZE) 个磁盘块
+// inode节点开始位置,占 INODE_NUM/(BLOCK_SIZE/INODE_SIZE) 个磁盘块即 129 个磁盘块
 const int iNodeStartPos = blockBitmapStartPos + 20 * BLOCK_SIZE;
-// 数据块开始位置
+// 数据块开始位置，占 BLOCK_NUM 个磁盘块
 const int blockStartPos = iNodeStartPos + (MAX_INODE_NUM * INODE_SIZE) / BLOCK_SIZE + 1;
 // 虚拟磁盘文件大小
 const int diskBlockSize = blockStartPos + BLOCK_NUM * BLOCK_SIZE;
-// 单个文件最大大小
-const int maxFileSize = 10 * BLOCK_SIZE + BLOCK_SIZE/sizeof(int) * BLOCK_SIZE + BLOCK_SIZE/sizeof(int) * BLOCK_SIZE * BLOCK_SIZE/sizeof(int);
+// 单个虚拟磁盘文件文件最大大小
+const int maxFileSize = 9 * BLOCK_SIZE + BLOCK_SIZE/sizeof(int) * BLOCK_SIZE + BLOCK_SIZE/sizeof(int) * BLOCK_SIZE * BLOCK_SIZE/sizeof(int);
 
 /* 数据结构定义 */
 
@@ -160,8 +173,8 @@ struct INode
     time_t iNodeModifyTime;
     // 文件访问时间，时间戳
     time_t iNodeAccessTime;
-    // 文件数据块指针, 13个直接指针，1个一级间接指针，1个二级间接指针，1个三级间接指针
-    unsigned int iNodeBlockPointer[16];
+    // 文件数据块指针, 9个直接指针，1个一级间接指针，1个二级间接指针，1个三级间接指针
+    int iNodeBlockPointer[BLOCK_POINTER_NUM];
 };
 
 /**
@@ -198,6 +211,10 @@ class FileSystem {
 public:
     // 构造函数
     FileSystem();
+    // 析构函数
+    ~FileSystem();
+    bool installed;
+    /*-------------------文件系统基本操作-------------------*/
     void getHostName();
     int allocateINode();
     bool freeINode(int iNodeAddr);
@@ -207,10 +224,53 @@ public:
     void initSystemConfig();
     void create(const std::string &systemName);
     bool installFileSystem();
+    void uninstall();
     void load(const std::string &filename);
     void save();
-    void execute(const std::string &command);
+    void help(const std::string& command);
+    void executeInFS(const std::string &command);
     void printSuperBlock();
+    void printSystemInfo();
+    /*-------------------文件系统文件操作-------------------*/
+    void createFile(std::string args[2]);
+    void readFile(std::string args[2]);
+    void writeFile(std::string args[2]);
+    void deleteFile(std::string args[2]);
+    /*-------------------文件系统目录操作-------------------*/
+    // 创建目录，对应mkdir命令
+    void makeDir(const std::string& arg);
+    bool mkdirHelper(bool pFlag, const std::string& dirName, int inodeAddr);
+    // 删除目录，对应rmdir命令
+    void removeDir(const std::string& arg);
+    // 列出当前目录下的文件和目录，对应ls命令
+    void listDir(const std::string& arg);
+    void listDirByINode(int inodeAddr, int lsMode);
+    // 切换目录
+    bool changeDir(const std::string& arg);
+    // 打印当前目录，对应pwd命令
+    void printCurrentDir();
+    /*-------------------文件系统用户操作-------------------*/
+    // 即用户登录，可以用于切换用户，对应su命令
+    void login(const std::string &userName, const std::string &password);
+    void logout();
+    // 创建用户，对应useradd命令
+    void createUser(const std::string &userName, const std::string &password);
+    // 删除用户，对应userdel命令
+    void deleteUser(const std::string &userName);
+    // 修改用户密码，对应passwd命令
+    void changePassword(const std::string &userName, const std::string &password);
+    // 列出用户，对应who命令
+    void listUser();
+    // 列出用户组，对应group命令
+    void listGroup();
+    /*-------------------文件系统权限操作-------------------*/
+    void changeMode(const std::string &filename, const std::string &mode);
+    void changeOwner(const std::string &filename, const std::string &owner);
+    void changeGroup(const std::string &filename, const std::string &group);
+    /*-------------------文件系统其他操作-------------------*/
+    void help();
+    // 清空屏幕
+    void clear();
 
 private:
     /*-------------------系统-------------------*/
@@ -220,6 +280,8 @@ private:
     std::ifstream fr;
     // 写系统文件的指针
     std::ofstream fw;
+    // 替换为读写系统文件的指针
+    std::fstream frw;
     // 超级块
     SuperBlock superBlock;
     // inode位图
@@ -232,8 +294,10 @@ private:
     UserState userState;
     // 当前目录
     int currentDir;
+    // 当前用户主目录
+    int userHomeDir;
     // 当前目录名
-    char currentDirName[8*MAX_DIRITEM_NAME_LEN];
+    std::string currentDirName;
     // 当前主机名
     char hostName[MAX_HOST_NAME_LEN];
     // 根目录inode节点
