@@ -5,6 +5,7 @@ set(SOURCES
         main.cpp
         FileSystem.cpp
         FSHelper.cpp
+        ioTest.cpp
 )
 
 # Create the executable

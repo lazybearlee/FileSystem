@@ -98,6 +98,13 @@ build src/CMakeFiles/SimpleFileSystem.dir/FSHelper.cpp.obj: CXX_COMPILER__Simple
   OBJECT_DIR = src\CMakeFiles\SimpleFileSystem.dir
   OBJECT_FILE_DIR = src\CMakeFiles\SimpleFileSystem.dir
 
+build src/CMakeFiles/SimpleFileSystem.dir/ioTest.cpp.obj: CXX_COMPILER__SimpleFileSystem_unscanned_Debug D$:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src/ioTest.cpp || cmake_object_order_depends_target_SimpleFileSystem
+  DEP_FILE = src\CMakeFiles\SimpleFileSystem.dir\ioTest.cpp.obj.d
+  FLAGS = -g -std=gnu++14 -fdiagnostics-color=always
+  INCLUDES = -ID:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src
+  OBJECT_DIR = src\CMakeFiles\SimpleFileSystem.dir
+  OBJECT_FILE_DIR = src\CMakeFiles\SimpleFileSystem.dir
+
 
 # =============================================================================
 # Link build statements for EXECUTABLE target SimpleFileSystem
@@ -106,7 +113,7 @@ build src/CMakeFiles/SimpleFileSystem.dir/FSHelper.cpp.obj: CXX_COMPILER__Simple
 #############################################
 # Link the executable src\SimpleFileSystem.exe
 
-build src/SimpleFileSystem.exe: CXX_EXECUTABLE_LINKER__SimpleFileSystem_Debug src/CMakeFiles/SimpleFileSystem.dir/main.cpp.obj src/CMakeFiles/SimpleFileSystem.dir/FileSystem.cpp.obj src/CMakeFiles/SimpleFileSystem.dir/FSHelper.cpp.obj
+build src/SimpleFileSystem.exe: CXX_EXECUTABLE_LINKER__SimpleFileSystem_Debug src/CMakeFiles/SimpleFileSystem.dir/main.cpp.obj src/CMakeFiles/SimpleFileSystem.dir/FileSystem.cpp.obj src/CMakeFiles/SimpleFileSystem.dir/FSHelper.cpp.obj src/CMakeFiles/SimpleFileSystem.dir/ioTest.cpp.obj
   FLAGS = -g
   LINK_FLAGS = -static-libgcc -static-libstdc++
   LINK_LIBRARIES = -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32

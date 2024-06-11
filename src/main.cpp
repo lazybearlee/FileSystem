@@ -2,20 +2,51 @@
 #include <sstream>
 #include "FileSystem.h"
 
-int main() {
-    std::cout << "Welcome to the file system!" << std::endl;
+/**
+ * 打印系统欢迎信息
+ */
+void printSystemWelcome()
+{
+    // 一个大大大logo
+    std::string fsLogo = R"(
+  _______  _______
+ |  _____||  _____|
+ | |_____ | |_____
+ |  _____||_____  |
+ | |       _____| |
+ |_|      |_______|)";
+
+    std::string welcomeMessage = R"(
+*******************************************
+*                                         *
+*           Welcome to the LiFS           *
+*           File System!                  *
+*                                         *
+*******************************************)";
+
+    std::cout << fsLogo << std::endl;
+    std::cout << welcomeMessage << std::endl;
     // 打印文件系统的版本、作者等信息
     std::cout << "Version: " << VERSION << std::endl;
     std::cout << "Author: " << AUTHOR << std::endl;
     std::cout << "Email: " << EMAIL << std::endl;
     std::cout << std::endl;
+}
 
+int main() {
+    // 打印系统信息
+    printSystemWelcome();
     FileSystem fs;
     std::string input;
+
+    // testIO();
 
     while (true) {
         // 如果已经载入文件系统，那么显示当前路径
         if (fs.installed) {
+            // 打印用户、主机名
+            fs.printUserAndHostName();
+            // 打印当前路径
             fs.printCurrentDir();
             std::cout << " $ ";
         }
@@ -59,6 +90,12 @@ int main() {
         else if (command == "super")
         {
             fs.printSuperBlock();
+        }
+        else if (command == "info")
+        {
+            fs.printBuffer();
+            fs.readSuperBlock();
+            fs.printSystemInfo();
         }
         else {
             fs.executeInFS(input);

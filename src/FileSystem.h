@@ -32,8 +32,8 @@
 #define BLOCK_POINTER_NUM 12
 // 目录项名称最大长度
 #define MAX_DIRITEM_NAME_LEN 28
-// 虚拟磁盘大小，即32MB
-#define MAX_DISK_SIZE (3200*1000)
+// 虚拟磁盘大小，即3.2MB
+#define MAX_DISK_SIZE (320*1000)
 // BLOCK数目，暂定为1024
 #define BLOCK_NUM 1024
 // inode节点数目，暂定为512
@@ -66,9 +66,9 @@
 // 其他用户执行权限
 #define OTHERS_X	1
 // 默认权限：文件，即本用户和组用户有读写权限，其他用户有读权限
-#define DEFAULT_FILE_MODE 0664
+#define DEFAULT_FILE_MODE 0777
 // 默认权限：目录，即本用户有读写执行权限，其他用户和组用户有读和执行权限
-#define DEFAULT_DIR_MODE 0755
+#define DEFAULT_DIR_MODE 0777
 
 /* 用户 */
 // 用户名最大长度
@@ -101,7 +101,8 @@ const int blockStartPos = iNodeStartPos + (MAX_INODE_NUM * INODE_SIZE) / BLOCK_S
 const int diskBlockSize = blockStartPos + BLOCK_NUM * BLOCK_SIZE;
 // 单个虚拟磁盘文件文件最大大小
 const int maxFileSize = 9 * BLOCK_SIZE + BLOCK_SIZE/sizeof(int) * BLOCK_SIZE + BLOCK_SIZE/sizeof(int) * BLOCK_SIZE * BLOCK_SIZE/sizeof(int);
-
+// 虚拟磁盘缓冲区，初始为最大缓冲区大小
+static char diskBuffer[MAX_DISK_SIZE];
 /* 数据结构定义 */
 
 /**
@@ -207,14 +208,19 @@ struct UserState
     unsigned short userGroupID;
 };
 
+void testIO();
+
 class FileSystem {
 public:
     // 构造函数
     FileSystem();
     // 析构函数
     ~FileSystem();
+    void printBuffer();
+    void readSuperBlock();
     bool installed;
     /*-------------------文件系统基本操作-------------------*/
+
     void getHostName();
     int allocateINode();
     bool freeINode(int iNodeAddr);
@@ -231,39 +237,41 @@ public:
     void executeInFS(const std::string &command);
     void printSuperBlock();
     void printSystemInfo();
+    void printUserAndHostName();
+
     /*-------------------文件系统文件操作-------------------*/
-    void createFile(std::string args[2]);
-    void readFile(std::string args[2]);
-    void writeFile(std::string args[2]);
-    void deleteFile(std::string args[2]);
+
+    bool createFileHelper(const std::string& fileName, int inodeAddr, char* content, unsigned int size);
+    void createFile(const std::string& arg);
+    bool readFile(int inodeAddr, unsigned int offset, unsigned int size, char* content);
+    void catFile(const std::string& arg);
+    bool writeFile(int inodeAddr, const char* content, unsigned int size, unsigned int offset);
+    void deleteFile(const std::string& arg);
+
     /*-------------------文件系统目录操作-------------------*/
-    // 创建目录，对应mkdir命令
+
     void makeDir(const std::string& arg);
     bool mkdirHelper(bool pFlag, const std::string& dirName, int inodeAddr);
-    // 删除目录，对应rmdir命令
+    bool rmdirHelper(bool ignore, bool pFlag, const std::string& dirName, int inodeAddr);
     void removeDir(const std::string& arg);
-    // 列出当前目录下的文件和目录，对应ls命令
     void listDir(const std::string& arg);
     void listDirByINode(int inodeAddr, int lsMode);
-    // 切换目录
-    bool changeDir(const std::string& arg);
-    // 打印当前目录，对应pwd命令
+    bool changeDir(const std::string& arg, int& currentDir, std::string& currentDirName);
     void printCurrentDir();
+
     /*-------------------文件系统用户操作-------------------*/
-    // 即用户登录，可以用于切换用户，对应su命令
+
     void login(const std::string &userName, const std::string &password);
     void logout();
-    // 创建用户，对应useradd命令
+
     void createUser(const std::string &userName, const std::string &password);
-    // 删除用户，对应userdel命令
     void deleteUser(const std::string &userName);
-    // 修改用户密码，对应passwd命令
     void changePassword(const std::string &userName, const std::string &password);
-    // 列出用户，对应who命令
     void listUser();
-    // 列出用户组，对应group命令
     void listGroup();
+
     /*-------------------文件系统权限操作-------------------*/
+
     void changeMode(const std::string &filename, const std::string &mode);
     void changeOwner(const std::string &filename, const std::string &owner);
     void changeGroup(const std::string &filename, const std::string &group);
@@ -274,8 +282,6 @@ public:
 
 private:
     /*-------------------系统-------------------*/
-    // 虚拟磁盘缓冲区，初始为最大缓冲区大小
-    static char diskBuffer[MAX_DISK_SIZE];
     // 读系统文件的指针
     std::ifstream fr;
     // 写系统文件的指针
