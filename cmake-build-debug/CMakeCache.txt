@@ -157,7 +157,7 @@ CMAKE_PROJECT_DESCRIPTION:STATIC=
 CMAKE_PROJECT_HOMEPAGE_URL:STATIC=
 
 //Value Computed by CMake
-CMAKE_PROJECT_NAME:STATIC=SimpleFileSystem
+CMAKE_PROJECT_NAME:STATIC=LiFileSystem
 
 //Path to a program.
 CMAKE_RANLIB:FILEPATH=D:/tools/CLion 2024.1.2/bin/mingw/bin/ranlib.exe
@@ -253,6 +253,15 @@ FileSystem_SOURCE_DIR:STATIC=D:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/Fi
 
 //The directory containing a CMake configuration file for GTest.
 GTest_DIR:PATH=D:/Anconda/Library/lib/cmake/GTest
+
+//Value Computed by CMake
+LiFileSystem_BINARY_DIR:STATIC=D:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/cmake-build-debug
+
+//Value Computed by CMake
+LiFileSystem_IS_TOP_LEVEL:STATIC=ON
+
+//Value Computed by CMake
+LiFileSystem_SOURCE_DIR:STATIC=D:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem
 
 //Value Computed by CMake
 SimpleFileSystem_BINARY_DIR:STATIC=D:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/cmake-build-debug

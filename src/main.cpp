@@ -39,8 +39,6 @@ int main() {
     FileSystem fs;
     std::string input;
 
-    // testIO();
-
     while (true) {
         // 如果已经载入文件系统，那么显示当前路径
         if (fs.installed) {
@@ -59,7 +57,16 @@ int main() {
         std::string command;
         iss >> command;
 
+        // 清楚当前cout中的内容，避免输出额外的空格
+        std::cout.clear();
+
         if (command == "exit") {
+            // 如果文件系统还未载入
+            if (!fs.installed)
+            {
+                std::cerr << "Error: File system not installed." << std::endl;
+                continue;
+            }
             fs.save();
             fs.uninstall();
         }
@@ -69,35 +76,32 @@ int main() {
             fs.~FileSystem();
             exit(0);
         }
+        // 如果为clear命令，清屏
+        else if (command == "clear")
+        {
+            fs.clearScreen();
+        }
         else if (command == "new") {
             std::string systemName;
             iss >> systemName;
-            if (systemName.empty()) {
-                std::cerr << "Error: Missing system name for 'new' command." << std::endl;
-                continue;
+            if (systemName.empty())
+            {
+                // 如果没有输入文件系统名称,采用默认名称
+                systemName = "LiFS";
             }
-            fs.create(systemName);
+            fs.createFileSystem(systemName);
         }
         else if (command == "sys") {
             std::string filename;
             iss >> filename;
-            if (filename.empty()) {
-                std::cerr << "Error: Missing filename for 'sys' command." << std::endl;
-                continue;
+            if (filename.empty())
+            {
+                // 如果没有输入文件名，采用默认文件名
+                filename = "LiFS.vdisk";
             }
             fs.load(filename);
         }
-        else if (command == "super")
-        {
-            fs.printSuperBlock();
-        }
-        else if (command == "info")
-        {
-            fs.printBuffer();
-            fs.readSuperBlock();
-            fs.printSystemInfo();
-        }
-        else {
+        else if (fs.installed){
             fs.executeInFS(input);
         }
     }

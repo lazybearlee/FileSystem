@@ -6,8 +6,13 @@ set(SOURCES
         FileSystem.cpp
         FSHelper.cpp
         ioTest.cpp
+        INodeCache.h
+        VDisk.h
+        INodeCache.cpp
+        FileManager.h
+        FileManager.cpp
 )
 
 # Create the executable
-add_executable(SimpleFileSystem ${SOURCES})
+add_executable(LiFileSystem ${SOURCES})
 

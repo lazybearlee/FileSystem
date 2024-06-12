@@ -19,15 +19,6 @@ void Helper::showHelpInformation(const std::string& command)
         // 支持的命令
         std::cout << "Commands:" << std::endl;
         std::cout << "  help [command]  Display help information." << std::endl;
-        std::cout << "  su [user]       Switch user." << std::endl;
-        std::cout << "  useradd [user]  Add user." << std::endl;
-        std::cout << "  userdel [user]  Delete user." << std::endl;
-        std::cout << "  passwd [user]   Change password." << std::endl;
-        std::cout << "  who             List users." << std::endl;
-        std::cout << "  group           List groups." << std::endl;
-        std::cout << "  chmod [file]    Change mode." << std::endl;
-        std::cout << "  chown [file]    Change owner." << std::endl;
-        std::cout << "  chgrp [file]    Change group." << std::endl;
         std::cout << "  new [name]      Create file system." << std::endl;
         std::cout << "  sys [name]      Load file system." << std::endl;
         std::cout << "  save            Save file system." << std::endl;
@@ -37,11 +28,22 @@ void Helper::showHelpInformation(const std::string& command)
         std::cout << "  read [file]     Read file." << std::endl;
         std::cout << "  write [file]    Write file." << std::endl;
         std::cout << "  delete [file]   Delete file." << std::endl;
-        std::cout << "  mkdir [dir]     Make directory." << std::endl;
-        std::cout << "  rmdir [dir]     Remove directory." << std::endl;
+        std::cout << "  mkdir [-p] [dir]     Make directory." << std::endl;
+        std::cout << "  rmdir [-p] [--ignore-fail-on-non-empty] [dir]     Remove directory." << std::endl;
         std::cout << "  ls [-l] [dir]   List directory with details." << std::endl;
         std::cout << "  cd [dir]        Change directory." << std::endl;
         std::cout << "  pwd             Print working directory." << std::endl;
+        // TODO: Add more commands
+        std::cout << "TODO: Add more commands." << std::endl;
+        std::cout << "  su [user]       Switch user." << std::endl;
+        std::cout << "  useradd [user]  Add user." << std::endl;
+        std::cout << "  userdel [user]  Delete user." << std::endl;
+        std::cout << "  passwd [user]   Change password." << std::endl;
+        std::cout << "  who             List users." << std::endl;
+        std::cout << "  group           List groups." << std::endl;
+        std::cout << "  chmod [file]    Change mode." << std::endl;
+        std::cout << "  chown [file]    Change owner." << std::endl;
+        std::cout << "  chgrp [file]    Change group." << std::endl;
     }
     // 如果是其他命令，暂时不管，到时候转到对应的函数
     else

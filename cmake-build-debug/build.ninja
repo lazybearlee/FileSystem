@@ -11,7 +11,7 @@
 # =============================================================================
 
 # =============================================================================
-# Project: SimpleFileSystem
+# Project: LiFileSystem
 # Configurations: Debug
 # =============================================================================
 
@@ -69,60 +69,74 @@ build rebuild_cache: phony CMakeFiles/rebuild_cache.util
 # =============================================================================
 
 # =============================================================================
-# Object build statements for EXECUTABLE target SimpleFileSystem
+# Object build statements for EXECUTABLE target LiFileSystem
 
 
 #############################################
-# Order-only phony target for SimpleFileSystem
+# Order-only phony target for LiFileSystem
 
-build cmake_object_order_depends_target_SimpleFileSystem: phony || src/CMakeFiles/SimpleFileSystem.dir
+build cmake_object_order_depends_target_LiFileSystem: phony || src/CMakeFiles/LiFileSystem.dir
 
-build src/CMakeFiles/SimpleFileSystem.dir/main.cpp.obj: CXX_COMPILER__SimpleFileSystem_unscanned_Debug D$:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src/main.cpp || cmake_object_order_depends_target_SimpleFileSystem
-  DEP_FILE = src\CMakeFiles\SimpleFileSystem.dir\main.cpp.obj.d
+build src/CMakeFiles/LiFileSystem.dir/main.cpp.obj: CXX_COMPILER__LiFileSystem_unscanned_Debug D$:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src/main.cpp || cmake_object_order_depends_target_LiFileSystem
+  DEP_FILE = src\CMakeFiles\LiFileSystem.dir\main.cpp.obj.d
   FLAGS = -g -std=gnu++14 -fdiagnostics-color=always
   INCLUDES = -ID:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src
-  OBJECT_DIR = src\CMakeFiles\SimpleFileSystem.dir
-  OBJECT_FILE_DIR = src\CMakeFiles\SimpleFileSystem.dir
+  OBJECT_DIR = src\CMakeFiles\LiFileSystem.dir
+  OBJECT_FILE_DIR = src\CMakeFiles\LiFileSystem.dir
 
-build src/CMakeFiles/SimpleFileSystem.dir/FileSystem.cpp.obj: CXX_COMPILER__SimpleFileSystem_unscanned_Debug D$:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src/FileSystem.cpp || cmake_object_order_depends_target_SimpleFileSystem
-  DEP_FILE = src\CMakeFiles\SimpleFileSystem.dir\FileSystem.cpp.obj.d
+build src/CMakeFiles/LiFileSystem.dir/FileSystem.cpp.obj: CXX_COMPILER__LiFileSystem_unscanned_Debug D$:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src/FileSystem.cpp || cmake_object_order_depends_target_LiFileSystem
+  DEP_FILE = src\CMakeFiles\LiFileSystem.dir\FileSystem.cpp.obj.d
   FLAGS = -g -std=gnu++14 -fdiagnostics-color=always
   INCLUDES = -ID:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src
-  OBJECT_DIR = src\CMakeFiles\SimpleFileSystem.dir
-  OBJECT_FILE_DIR = src\CMakeFiles\SimpleFileSystem.dir
+  OBJECT_DIR = src\CMakeFiles\LiFileSystem.dir
+  OBJECT_FILE_DIR = src\CMakeFiles\LiFileSystem.dir
 
-build src/CMakeFiles/SimpleFileSystem.dir/FSHelper.cpp.obj: CXX_COMPILER__SimpleFileSystem_unscanned_Debug D$:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src/FSHelper.cpp || cmake_object_order_depends_target_SimpleFileSystem
-  DEP_FILE = src\CMakeFiles\SimpleFileSystem.dir\FSHelper.cpp.obj.d
+build src/CMakeFiles/LiFileSystem.dir/FSHelper.cpp.obj: CXX_COMPILER__LiFileSystem_unscanned_Debug D$:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src/FSHelper.cpp || cmake_object_order_depends_target_LiFileSystem
+  DEP_FILE = src\CMakeFiles\LiFileSystem.dir\FSHelper.cpp.obj.d
   FLAGS = -g -std=gnu++14 -fdiagnostics-color=always
   INCLUDES = -ID:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src
-  OBJECT_DIR = src\CMakeFiles\SimpleFileSystem.dir
-  OBJECT_FILE_DIR = src\CMakeFiles\SimpleFileSystem.dir
+  OBJECT_DIR = src\CMakeFiles\LiFileSystem.dir
+  OBJECT_FILE_DIR = src\CMakeFiles\LiFileSystem.dir
 
-build src/CMakeFiles/SimpleFileSystem.dir/ioTest.cpp.obj: CXX_COMPILER__SimpleFileSystem_unscanned_Debug D$:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src/ioTest.cpp || cmake_object_order_depends_target_SimpleFileSystem
-  DEP_FILE = src\CMakeFiles\SimpleFileSystem.dir\ioTest.cpp.obj.d
+build src/CMakeFiles/LiFileSystem.dir/ioTest.cpp.obj: CXX_COMPILER__LiFileSystem_unscanned_Debug D$:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src/ioTest.cpp || cmake_object_order_depends_target_LiFileSystem
+  DEP_FILE = src\CMakeFiles\LiFileSystem.dir\ioTest.cpp.obj.d
   FLAGS = -g -std=gnu++14 -fdiagnostics-color=always
   INCLUDES = -ID:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src
-  OBJECT_DIR = src\CMakeFiles\SimpleFileSystem.dir
-  OBJECT_FILE_DIR = src\CMakeFiles\SimpleFileSystem.dir
+  OBJECT_DIR = src\CMakeFiles\LiFileSystem.dir
+  OBJECT_FILE_DIR = src\CMakeFiles\LiFileSystem.dir
+
+build src/CMakeFiles/LiFileSystem.dir/INodeCache.cpp.obj: CXX_COMPILER__LiFileSystem_unscanned_Debug D$:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src/INodeCache.cpp || cmake_object_order_depends_target_LiFileSystem
+  DEP_FILE = src\CMakeFiles\LiFileSystem.dir\INodeCache.cpp.obj.d
+  FLAGS = -g -std=gnu++14 -fdiagnostics-color=always
+  INCLUDES = -ID:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src
+  OBJECT_DIR = src\CMakeFiles\LiFileSystem.dir
+  OBJECT_FILE_DIR = src\CMakeFiles\LiFileSystem.dir
+
+build src/CMakeFiles/LiFileSystem.dir/FileManager.cpp.obj: CXX_COMPILER__LiFileSystem_unscanned_Debug D$:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src/FileManager.cpp || cmake_object_order_depends_target_LiFileSystem
+  DEP_FILE = src\CMakeFiles\LiFileSystem.dir\FileManager.cpp.obj.d
+  FLAGS = -g -std=gnu++14 -fdiagnostics-color=always
+  INCLUDES = -ID:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src
+  OBJECT_DIR = src\CMakeFiles\LiFileSystem.dir
+  OBJECT_FILE_DIR = src\CMakeFiles\LiFileSystem.dir
 
 
 # =============================================================================
-# Link build statements for EXECUTABLE target SimpleFileSystem
+# Link build statements for EXECUTABLE target LiFileSystem
 
 
 #############################################
-# Link the executable src\SimpleFileSystem.exe
+# Link the executable src\LiFileSystem.exe
 
-build src/SimpleFileSystem.exe: CXX_EXECUTABLE_LINKER__SimpleFileSystem_Debug src/CMakeFiles/SimpleFileSystem.dir/main.cpp.obj src/CMakeFiles/SimpleFileSystem.dir/FileSystem.cpp.obj src/CMakeFiles/SimpleFileSystem.dir/FSHelper.cpp.obj src/CMakeFiles/SimpleFileSystem.dir/ioTest.cpp.obj
+build src/LiFileSystem.exe: CXX_EXECUTABLE_LINKER__LiFileSystem_Debug src/CMakeFiles/LiFileSystem.dir/main.cpp.obj src/CMakeFiles/LiFileSystem.dir/FileSystem.cpp.obj src/CMakeFiles/LiFileSystem.dir/FSHelper.cpp.obj src/CMakeFiles/LiFileSystem.dir/ioTest.cpp.obj src/CMakeFiles/LiFileSystem.dir/INodeCache.cpp.obj src/CMakeFiles/LiFileSystem.dir/FileManager.cpp.obj
   FLAGS = -g
   LINK_FLAGS = -static-libgcc -static-libstdc++
   LINK_LIBRARIES = -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
-  OBJECT_DIR = src\CMakeFiles\SimpleFileSystem.dir
+  OBJECT_DIR = src\CMakeFiles\LiFileSystem.dir
   POST_BUILD = cd .
   PRE_LINK = cd .
-  TARGET_FILE = src\SimpleFileSystem.exe
-  TARGET_IMPLIB = src\libSimpleFileSystem.dll.a
-  TARGET_PDB = SimpleFileSystem.exe.dbg
+  TARGET_FILE = src\LiFileSystem.exe
+  TARGET_IMPLIB = src\libLiFileSystem.dll.a
+  TARGET_PDB = LiFileSystem.exe.dbg
 
 
 #############################################
@@ -150,9 +164,9 @@ build src/rebuild_cache: phony src/CMakeFiles/rebuild_cache.util
 # =============================================================================
 # Target aliases.
 
-build SimpleFileSystem: phony src/SimpleFileSystem.exe
+build LiFileSystem: phony src/LiFileSystem.exe
 
-build SimpleFileSystem.exe: phony src/SimpleFileSystem.exe
+build LiFileSystem.exe: phony src/LiFileSystem.exe
 
 # =============================================================================
 # Folder targets.
@@ -169,7 +183,7 @@ build all: phony src/all
 #############################################
 # Folder: D:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/cmake-build-debug/src
 
-build src/all: phony src/SimpleFileSystem.exe
+build src/all: phony src/LiFileSystem.exe
 
 # =============================================================================
 # Built-in targets
