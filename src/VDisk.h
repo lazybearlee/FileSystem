@@ -40,8 +40,6 @@
 #define FREE_BLOCK_STACK_SIZE 64
 // inode缓存大小
 #define MAX_INODE_CACHE_SIZE 128
-// 最大文件描述符数目
-#define MAX_FD_NUM 128
 
 /*-------------------文件系统目录项/INode常量-------------------*/
 
@@ -49,6 +47,8 @@
 #define FILE_TYPE 00000
 // 目录类型
 #define DIR_TYPE 01000
+// 链接类型
+#define LINK_TYPE 02000
 // 本用户读权限
 #define OWNER_R	4<<6
 //本用户写权限
@@ -158,7 +158,7 @@ struct SuperBlock
 struct INode
 {
     // inode节点号
-    unsigned short iNodeNum;
+    unsigned short iNodeNo;
     // 文件类型与存取权限 采用八进制表示 例如：0755表示文件类型为普通文件，所有者有读写执行权限，组用户和其他用户有读和执行权限
     unsigned short iNodeMode;
     // 链接数
@@ -188,6 +188,18 @@ struct DirItem
     char itemName[MAX_DIRITEM_NAME_LEN];
     // inode地址
     int iNodeAddr;
+};
+
+/**
+ * 空闲目录项索引
+ * 包括目录项索引和目录项内的索引
+ */
+struct FreeDirItemIndex
+{
+    // 目录项索引
+    int dirItemIndex;
+    // 目录项内的索引
+    int dirItemInnerIndex;
 };
 
 #endif //VDISK_H

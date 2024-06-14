@@ -10,6 +10,8 @@ INodeCache::INodeCache(int capacity)
     this->capacity = capacity;
     // 初始化当前缓存大小
     this->currentSize = 0;
+    // 初始化哈希表
+    this->cache.clear();
     // 初始化头尾指针
     this->head = new INodeCacheItem();
     this->head->prev = nullptr;
@@ -26,6 +28,11 @@ INodeCache::INodeCache(int capacity)
  */
 INodeCacheItem* INodeCache::findINodeCacheItem(const std::string& fileName)
 {
+    // 如果缓存为空
+    if (this->cache.empty())
+    {
+        return nullptr;
+    }
     // 使用哈希表查找
     auto it = this->cache.find(fileName);
     if (it != this->cache.end())
@@ -64,7 +71,9 @@ int INodeCache::findINodeAddrByFileName(const std::string& fileName)
     INodeCacheItem* item = findINodeCacheItem(fileName);
     if (item != nullptr)
     {
-        return item->iNodeAddr;
+        // 根据iNode的序号计算iNode的地址
+        int iNodeAddr = iNodeStartPos + item->iNode.iNodeNo * INODE_SIZE;
+        return iNodeAddr;
     }
     return -1;
 }
@@ -75,23 +84,20 @@ int INodeCache::findINodeAddrByFileName(const std::string& fileName)
  * @param iNodeAddr
  * @param iNode
  */
-bool INodeCache::addINodeToCache(const std::string& fileName, int iNodeAddr, INode iNode)
+bool INodeCache::addINodeToCache(const std::string& fileName, INode iNode)
 {
     // 首先判断是否已经存在
     INodeCacheItem* item = findINodeCacheItem(fileName);
     if (item != nullptr)
     {
-        // 如果存在，更新值
-        item->iNodeAddr = iNodeAddr;
         item->iNode = iNode;
         // 将该节点移到头部
         moveToHead(item);
         return true;
     }
     // 如果不存在，创建新节点
-    INodeCacheItem* newItem = new INodeCacheItem();
+    auto newItem = new INodeCacheItem();
     newItem->fileName = fileName;
-    newItem->iNodeAddr = iNodeAddr;
     newItem->iNode = iNode;
     // 将新节点插入到头部
     addCacheItemToHead(newItem);

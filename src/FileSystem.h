@@ -8,6 +8,8 @@
 #include <FSHelper.h>
 #include <VDisk.h>
 #include <INodeCache.h>
+
+#include "FileManager.h"
 // 如果是Windows系统
 #if defined(WIN32) || defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
@@ -20,6 +22,8 @@
 /* 命令 */
 #define LS_DEFAULT 0
 #define LS_L 1
+
+
 
 /**
  * 用户状态
@@ -66,23 +70,35 @@ public:
     void uninstall();
     void load(const std::string &filename);
     void save();
-    void help(const std::string& command);
     void executeInFS(const std::string &command);
     void printSuperBlock();
     void printSystemInfo();
     void printUserAndHostName();
     void clearScreen();
+    std::string getAbsolutePath(const std::string& dirName, const std::string& INodeName);
+    INode* findINodeInDir(INode& dirINode, const std::string& dirName, const std::string& INodeName, int type);
+    FreeDirItemIndex findFreeDirItem(const INode& dirINode, const std::string& itemName, int itemType);
+    FreeDirItemIndex findFreeDirItem(const INode& dirINode);
+    void clearINodeBlocks(INode& iNode);
+    int calculatePermission(const INode& iNode);
+    INode* findINodeInCache(const std::string& absolutePath, int type);
 
     /*-------------------文件系统文件操作-------------------*/
-    int openFile(std::string& dirName, int dirAddr, std::string& fileName);
+
+    int openFile(std::string& dirName, int dirAddr, std::string& fileName, int mode);
     void openWithFilename(const std::string& arg);
-    void closeWithFilename(const std::string& arg);
-    void closeFileWithFD(int fd);
-    bool createFileHelper(const std::string& fileName, int inodeAddr, char* content, unsigned int size);
+    bool closeWithFd(int fd);
+    void closeFile(const std::string& arg);
+    void seekWithFd(const std::string& arg);
+    bool createFileHelper(const std::string& fileName, int dirINodeAddr, char* content, unsigned int size);
     void createFile(const std::string& arg);
-    bool readFile(int inodeAddr, unsigned int offset, unsigned int size, char* content);
+    bool sysReadFile(INode& iNode, unsigned int offset, unsigned int size, char* content);
+    bool readWithFd(int fd, char* content, unsigned int size);
+    void readFile(const std::string& arg);
     void catFile(const std::string& arg);
-    bool writeFile(int inodeAddr, const char* content, unsigned int size, unsigned int offset);
+    bool sysWriteFile(INode& iNode, const char* content, unsigned int size, unsigned int offset);
+    bool writeWithFd(int fd, const char* content, unsigned int size);
+    void writeFile(const std::string& arg);
     void deleteFile(const std::string& arg);
     void echoFile(const std::string& arg);
 
@@ -95,7 +111,6 @@ public:
     void listDir(const std::string& arg);
     void listDirByINode(int inodeAddr, int lsMode);
     bool changeDir(const std::string& arg, int& currentDir, std::string& currentDirName);
-    bool changeDirWithCache(const std::string& absolutePath, int& currentDir, std::string& currentDirName);
     void printCurrentDir();
 
     /*-------------------文件系统用户操作-------------------*/
@@ -131,8 +146,12 @@ private:
     std::bitset<MAX_INODE_NUM> iNodeBitmap;
     // 数据块位图
     std::bitset<BLOCK_NUM> blockBitmap;
-    // 文件inode缓存
-    INodeCache fileINodeCache;
+    // 判断inode缓存是否与磁盘同步的位图
+    std::bitset<MAX_INODE_NUM> iNodeCacheBitmap;
+    // FileManager类
+    FileManager fileManager;
+    // // 文件inode缓存
+    // INodeCache fileINodeCache;
     // 目录inode缓存
     INodeCache dirINodeCache;
 

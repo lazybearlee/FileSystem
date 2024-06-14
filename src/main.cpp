@@ -1,6 +1,7 @@
 #include <iostream>
 #include <sstream>
 #include "FileSystem.h"
+#include "FSHelper.h"
 
 /**
  * 打印系统欢迎信息
@@ -92,6 +93,12 @@ int main() {
             fs.createFileSystem(systemName);
         }
         else if (command == "sys") {
+            // 如果已经载入文件系统，那么提示
+            if (fs.installed)
+            {
+                std::cerr << "Error: File system already installed." << std::endl;
+                continue;
+            }
             std::string filename;
             iss >> filename;
             if (filename.empty())
@@ -101,8 +108,19 @@ int main() {
             }
             fs.load(filename);
         }
-        else if (fs.installed){
+        // help
+        else if (command == "help")
+        {
+            std::string subCommand;
+            iss >> subCommand;
+            Helper::showHelpInformation("help");
+        }
+        else if (fs.installed)
+        {
             fs.executeInFS(input);
+        }
+        else {
+            std::cerr << "Error: File system not installed." << std::endl;
         }
     }
     return 0;

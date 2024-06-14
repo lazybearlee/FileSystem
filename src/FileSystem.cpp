@@ -5,11 +5,12 @@
 #include <FSHelper.h>
 #include <sstream>
 #include <vector>
+#include <version>
 
 /**
  * 构造函数
  */
-FileSystem::FileSystem(): fileINodeCache(MAX_INODE_CACHE_SIZE), dirINodeCache(MAX_INODE_CACHE_SIZE)
+FileSystem::FileSystem(): dirINodeCache(MAX_INODE_CACHE_SIZE)
 {
     installed = false;
     nextGroupID = 0;
@@ -102,6 +103,617 @@ void FileSystem::getHostName()
 void FileSystem::printCurrentDir()
 {
     std::cout << currentDirName;
+}
+
+/**
+ * 格式化文件系统
+ * @return 是否格式化文件系统成功
+ */
+bool FileSystem::formatFileSystem()
+{
+    /*-------------------初始化超级块-------------------*/
+    // 设置超级块大小
+    superBlock.superBlockSize = sizeof(SuperBlock);
+    // 设置inode相关
+    superBlock.iNodeSize = sizeof(INode);
+    superBlock.iNodeNum = MAX_INODE_NUM;
+    superBlock.freeINodeNum = MAX_INODE_NUM;
+    // 设置数据块相关
+    superBlock.blockSize = BLOCK_SIZE;
+    superBlock.blockNum = BLOCK_NUM;
+    superBlock.freeBlockNum = BLOCK_NUM;
+    // 设置inode位图和数据块位图的起始位置
+    superBlock.iNodeBitmapPos = iNodeBitmapStartPos;
+    superBlock.blockBitmapPos = blockBitmapStartPos;
+    // 设置inode节点的起始位置
+    superBlock.iNodeStartPos = iNodeStartPos;
+    // 设置数据块的起始位置
+    superBlock.blockStartPos = blockStartPos;
+    // 设置每个块组的块数
+    superBlock.blockGroupSize = BLOCK_GROUP_SIZE;
+    // 设置空闲块堆栈栈顶为第一块BLOCK
+    superBlock.freeBlockAddr = blockStartPos;
+    // 设置超级块位置
+    superBlock.superBlockPos = superBlockStartPos;
+
+    /*-------------------初始化inode位图-------------------*/
+    // 初始化inode位图
+    iNodeBitmap.reset();
+    // 初始化文件内容中的inode位图
+    fw.seekp(iNodeBitmapStartPos, std::ios::beg);
+    fw.write(reinterpret_cast<char*>(&iNodeBitmap), sizeof(iNodeBitmap));
+
+    /*-------------------初始化数据块位图-------------------*/
+    // 初始化数据块位图
+    blockBitmap.reset();
+    // 初始化文件内容中的数据块位图
+    fw.seekp(blockBitmapStartPos, std::ios::beg);
+    fw.write(reinterpret_cast<char*>(&blockBitmap), sizeof(blockBitmap));
+
+    /*-------------------
+     * 初始化Block，将空闲栈进行初始化
+     * 初始化空闲块堆栈，从最后一个组开始将数据区按扇区分组，每组的第一个扇区存放下一个组的地址
+     * 每个组大小为 32*512B=16KB
+     *-------------------*/
+    for (int i = BLOCK_NUM / BLOCK_GROUP_SIZE - 1; i >= 0; i--)
+    {
+        // 将每个组的第一个扇区存放下一个组的地址
+        if (i == BLOCK_NUM / BLOCK_GROUP_SIZE - 1)
+        {
+            // 最后一个组的第一个扇区存放-1，表示没有下一个组
+            superBlock.freeBlockStack[0] = -1;
+        }
+        else
+        {
+            // 其他组的第一个扇区存放下一个组的地址
+            superBlock.freeBlockStack[0] = blockStartPos + (i + 1) * BLOCK_GROUP_SIZE * BLOCK_SIZE;
+        }
+        // 将每个组的其他扇区存放空闲块
+        for (int j = 1; j < BLOCK_GROUP_SIZE; j++)
+        {
+            superBlock.freeBlockStack[j] = blockStartPos + i * BLOCK_GROUP_SIZE * BLOCK_SIZE + j * BLOCK_SIZE;
+        }
+        // 将组写入文件，首先定位到组的第一个扇区
+        fw.seekp(blockStartPos + i * BLOCK_GROUP_SIZE * BLOCK_SIZE, std::ios::beg);
+        fw.write(reinterpret_cast<char*>(&superBlock.freeBlockStack), sizeof(superBlock.freeBlockStack));
+    }
+    // 将超级块写入文件
+    fw.seekp(superBlockStartPos, std::ios::beg);
+    fw.write(reinterpret_cast<char*>(&superBlock), sizeof(SuperBlock));
+
+    // 清空缓冲区
+    fw.flush();
+
+    // 读取位图
+    fr.seekg(iNodeBitmapStartPos, std::ios::beg);
+    fr.read(reinterpret_cast<char*>(&iNodeBitmap), sizeof(iNodeBitmap));
+    fr.seekg(blockBitmapStartPos, std::ios::beg);
+    fr.read(reinterpret_cast<char*>(&blockBitmap), sizeof(blockBitmap));
+
+    /*-------------------初始化目录与INode-------------------*/
+    // 初始化根目录inode
+    INode rootINode{};
+    // 为根目录inode申请inode空间
+    int iNodeAddr = allocateINode();
+    if (iNodeAddr == -1)
+    {
+        std::cerr << "Error: formatFileSystem---Failed to allocate inode for root directory." << std::endl;
+        return false;
+    }
+    // 为根目录inode申请数据块
+    int blockAddr = allocateBlock();
+    if (blockAddr == -1)
+    {
+        std::cerr << "Error: formatFileSystem---Failed to allocate block for root directory." << std::endl;
+        return false;
+    }
+
+    // 声明一个目录项数组，用于存放根目录的目录项
+    DirItem dirItems[16] = {};
+    // 初始化第一个目录项为"."
+    strcpy(dirItems[0].itemName, ".");
+    dirItems[0].iNodeAddr = iNodeAddr;
+    // 将目录写回
+    fw.seekp(blockAddr, std::ios::beg);
+    fw.write(reinterpret_cast<char*>(&dirItems), sizeof(dirItems));
+
+    // 给根目录inode赋值
+    // inode号
+    rootINode.iNodeNo = 0;
+    // 大小
+    rootINode.iNodeSize = superBlock.blockSize;
+    // 时间
+    rootINode.iNodeCreateTime = time(nullptr);
+    rootINode.iNodeModifyTime = time(nullptr);
+    rootINode.iNodeAccessTime = time(nullptr);
+    // 用户名与用户组
+    strcpy(rootINode.iNodeOwner, userState.userName);
+    strcpy(rootINode.iNodeGroup, userState.userGroup);
+    // 链接，目前为1，即初始化时仅链接到当前自己"."
+    rootINode.iNodeLink = 1;
+    // 设置inode数据项
+    rootINode.iNodeBlockPointer[0] = blockAddr;
+    for (int i = 1; i < BLOCK_POINTER_NUM; ++i)
+    {
+        rootINode.iNodeBlockPointer[i] = -1;
+    }
+    // 设置默认权限
+    rootINode.iNodeMode = DIR_TYPE | DEFAULT_DIR_MODE;
+
+    // 写回
+    fw.seekp(iNodeAddr, std::ios::beg);
+    fw.write(reinterpret_cast<char*>(&rootINode), sizeof(INode));
+
+    // 清空缓冲区
+    fw.flush();
+    return true;
+}
+
+/**
+ * 初始化文件系统的其他配置
+ * @brief 要求用户自己设定的文件系统的其他配置例如密码、用户、组等
+ */
+void FileSystem::initSystemConfig()
+{
+}
+
+/**
+ * 创建文件系统
+ * @param systemName 文件系统名
+ */
+void FileSystem::createFileSystem(const std::string& systemName)
+{
+    // 重组文件名，加上后缀
+    std::string filename = systemName + ".vdisk";
+    // 尝试创建文件
+    fw.open(filename, std::ios::out | std::ios::binary);
+    if (!fw.is_open())
+    {
+        std::cerr << "Error: Failed to create virtual disk. " << filename << std::endl;
+        return;
+    }
+    // 现在可以打开文件
+    fr.open(filename, std::ios::in | std::ios::binary);
+
+    // 获取主机名
+    getHostName();
+    // 设置根目录inode
+    rootINodeAddr = iNodeStartPos;
+    // 设置当前目录inode
+    currentDir = rootINodeAddr;
+    // 设置当前目录名
+    currentDirName = "/";
+
+    // 格式化文件系统
+    if (formatFileSystem())
+    {
+        std::cout << "File system created successfully." << std::endl;
+    }
+    else
+    {
+        std::cerr << "Error: Failed to create file system." << std::endl;
+    }
+
+    // 初始化文件系统的其他配置
+    initSystemConfig();
+
+    // 安装文件系统
+    if (installFileSystem())
+    {
+        std::cout << "File system is installed after created successfully." << std::endl;
+    }
+    else
+    {
+        std::cerr << "Error: Failed to load file system." << std::endl;
+    }
+}
+
+/**
+ * 安装文件系统
+ * @brief 将虚拟磁盘文件中的信息加载到内存中
+ * @return 是否安装文件系统成功
+ */
+bool FileSystem::installFileSystem()
+{
+    // 读取超级块
+    fr.seekg(superBlock.superBlockPos, std::ios::beg);
+    fr.read(reinterpret_cast<char*>(&superBlock), sizeof(SuperBlock));
+    if (fr.bad())
+    {
+        std::cerr << "Error: install---Failed to read super block." << std::endl;
+        return false;
+    }
+    // 读取inode位图
+    fr.seekg(superBlock.iNodeBitmapPos, std::ios::beg);
+    fr.read(reinterpret_cast<char*>(&iNodeBitmap), sizeof(iNodeBitmap));
+    if (fr.bad())
+    {
+        std::cerr << "Error: install---Failed to read inode bitmap." << std::endl;
+        return false;
+    }
+    // 读取数据块位图
+    fr.seekg(superBlock.blockBitmapPos, std::ios::beg);
+    fr.read(reinterpret_cast<char*>(&blockBitmap), sizeof(blockBitmap));
+    if (fr.bad())
+    {
+        std::cerr << "Error: install---Failed to read block bitmap." << std::endl;
+        return false;
+    }
+    installed = true;
+    // 初始化FileManager
+    fileManager = FileManager();
+    // 初始化INodeCache
+    dirINodeCache = INodeCache(MAX_INODE_CACHE_SIZE);
+    // 初始化一致性位图
+    iNodeCacheBitmap.reset();
+    // 将根目录inode加入缓存
+    INode rootINode = {};
+    fr.seekg(rootINodeAddr, std::ios::beg);
+    fr.read(reinterpret_cast<char*>(&rootINode), sizeof(INode));
+    dirINodeCache.addINodeToCache("/", rootINode);
+    iNodeCacheBitmap[rootINode.iNodeNo] = true;
+    return true;
+}
+
+void FileSystem::uninstall()
+{
+    // 关闭文件
+    fr.close();
+    fw.close();
+    // 重置文件系统
+    installed = false;
+    // 重置用户状态
+    userState = {};
+    // 设置char[] userState.userName 为"root"
+    strcpy(userState.userName, "root");
+    // 设置char[] userState.userGroup 为"root"
+    strcpy(userState.userGroup, "root");
+    // 重置当前目录
+    currentDir = rootINodeAddr;
+    // 重置当前用户主目录
+    userHomeDir = -1;
+    // 重置当前目录名
+    currentDirName = "/";
+    // 重置主机名
+    memset(hostName, 0, sizeof(hostName));
+    // 重置根目录inode节点
+    rootINodeAddr = -1;
+    // 重置superBlock
+    superBlock = {};
+}
+
+/**
+ * 保存文件系统
+ */
+void FileSystem::save()
+{
+    std::cout << "Saving file system..." << std::endl;
+    // 保存超级块
+    fw.seekp(superBlock.superBlockPos, std::ios::beg);
+    fw.write(reinterpret_cast<char*>(&superBlock), sizeof(SuperBlock));
+    // 保存inode位图
+    fw.seekp(superBlock.iNodeBitmapPos, std::ios::beg);
+    fw.write(reinterpret_cast<char*>(&iNodeBitmap), sizeof(iNodeBitmap));
+    // 保存数据块位图
+    fw.seekp(superBlock.blockBitmapPos, std::ios::beg);
+    fw.write(reinterpret_cast<char*>(&blockBitmap), sizeof(blockBitmap));
+    // 清空缓冲区
+    fw.flush();
+    // printBuffer();
+    std::cout << "File system saved successfully." << std::endl;
+}
+
+/**
+ * 打开虚拟磁盘文件
+ */
+void FileSystem::load(const std::string& filename)
+{
+    // 首先只读打开文件
+    fr.open(filename, std::ios::in | std::ios::binary);
+    if (!fr.is_open())
+    {
+        std::cerr << "Error: load---Failed to load virtual disk. " << filename << std::endl;
+        return;
+    }
+    // 读取文件
+    fr.read(diskBuffer, diskBlockSize);
+    fr.close();
+    fw.open(filename, std::ios::out | std::ios::binary);
+    if (!fw.is_open())
+    {
+        std::cerr << "Error: load---Failed to load virtual disk. " << filename << std::endl;
+        return;
+    }
+    // 将缓冲区写回
+    fw.write(diskBuffer, diskBlockSize);
+    fw.flush();
+    // 再次读打开文件
+    fr.open(filename, std::ios::in | std::ios::binary);
+    if (!fr.is_open())
+    {
+        std::cerr << "Error: load---Failed to load virtual disk. " << filename << std::endl;
+        return;
+    }
+    // printBuffer();
+    // 获取主机名
+    getHostName();
+    // 设置根目录inode
+    rootINodeAddr = iNodeStartPos;
+    // 设置当前目录inode
+    currentDir = rootINodeAddr;
+    // 设置当前目录名
+    currentDirName = "/";
+
+    // 安装文件系统
+    if (installFileSystem())
+    {
+        std::cout << "File system loaded successfully." << std::endl;
+    }
+    else
+    {
+        std::cerr << "Error: Failed to load file system." << std::endl;
+    }
+}
+
+/**
+ * 文件系统内执行命令
+ * @param command
+ */
+void FileSystem::executeInFS(const std::string& command)
+{
+    std::cout << "Executing command: " << command << std::endl;
+    // 解析命令
+    std::istringstream iss(command);
+    // 解析为数组，前面一个是命令，后面一个是参数
+    std::string args[2];
+    iss >> args[0] >> args[1];
+    // 将剩余命令参数也读取出来
+    std::string temp;
+    while (iss >> temp)
+    {
+        args[1] += " " + temp;
+    }
+    // 如果参数[0]为"help"或者参数[1]为"--help"
+    if (args[0] == "help" || args[1] == "--help")
+    {
+        Helper::showHelpInformation(args[0]);
+    }
+    // 判断命令
+    // 如果是pwd命令
+    if (args[0] == "pwd")
+    {
+        std::cout << currentDirName << std::endl;
+    }
+    // 如果是super命令
+    else if (args[0] == "super")
+    {
+        printSuperBlock();
+    }
+    // 如果是info命令
+    else if (args[0] == "info")
+    {
+        printSystemInfo();
+    }
+    // 格式化文件系统
+    else if (args[0] == "format")
+    {
+        formatFileSystem();
+    }
+    // 如果是cd命令
+    else if (args[0] == "cd")
+    {
+        int iNodeAddr = currentDir;
+        std::string temp = currentDirName;
+        if (!changeDir(args[1], currentDir, currentDirName))
+        {
+            currentDir = iNodeAddr;
+            currentDirName = temp;
+        }
+    }
+    // 如果是ls命令
+    else if (args[0] == "ls")
+    {
+        listDir(args[1]);
+    }
+    // 如果是mkdir命令
+    else if (args[0] == "mkdir")
+    {
+        makeDir(args[1]);
+    }
+    // 如果是rmdir命令
+    else if (args[0] == "rmdir")
+    {
+        removeDir(args[1]);
+    }
+    // 如果是create命令
+    else if (args[0] == "touch" || args[0] == "create")
+    {
+        createFile(args[1]);
+    }
+    // 如果是rm命令
+    else if (args[0] == "rm" || args[0] == "delete")
+    {
+        deleteFile(args[1]);
+    }
+    // 如果是cat命令
+    else if (args[0] == "cat")
+    {
+        catFile(args[1]);
+    }
+    // 如果是echo命令
+    else if (args[0] == "echo")
+    {
+        echoFile(args[1]);
+    }
+    // 如果是save命令
+    else if (args[0] == "save")
+    {
+        save();
+    }
+    // 如果是open命令
+    else if (args[0] == "open")
+    {
+        openWithFilename(args[1]);
+    }
+    // 如果是close命令
+    else if (args[0] == "close")
+    {
+        closeFile(args[1]);
+    }
+    // write
+    else if (args[0] == "write")
+    {
+        writeFile(args[1]);
+    }
+    // read
+    else if (args[0] == "read")
+    {
+        readFile(args[1]);
+    }
+    // seek
+    else if (args[0] == "seek")
+    {
+        seekWithFd(args[1]);
+    }
+    else
+    {
+        // 不识别的命令
+        std::cerr << "Error: Command not found." << std::endl;
+    }
+}
+
+/**
+ * 打印superBlock信息
+ */
+void FileSystem::printSuperBlock()
+{
+    // 空出一行
+    std::cout << std::endl;
+    // 超级块相关信息
+    std::cout << "SuperBlock:" << std::endl;
+    std::cout << "\tSize: " << superBlock.superBlockSize << std::endl;
+    std::cout << "\tStart position: " << superBlock.superBlockPos << std::endl;
+    // 位图
+    std::cout << "Bitmap:" << std::endl;
+    // inode位图,顺带打印inode位图
+    std::cout << "\tInode bitmap start position: " << iNodeBitmapStartPos << std::endl;
+    std::cout << "\tInode bitmap: ";
+    for (int i = 0; i < superBlock.iNodeNum; i++)
+    {
+        std::cout << iNodeBitmap[i];
+    }
+    std::cout << std::endl;
+    // 数据块位图
+    std::cout << "\tBlock bitmap start position: " << blockBitmapStartPos << std::endl;
+    std::cout << "\tBlock bitmap: ";
+    for (int i = 0; i < superBlock.blockNum; i++)
+    {
+        std::cout << blockBitmap[i];
+    }
+    std::cout << std::endl;
+    // inode相关信息
+    std::cout << "Inode:" << std::endl;
+    std::cout << "\tSize: " << superBlock.iNodeSize << std::endl;
+    std::cout << "\tNumber: " << superBlock.iNodeNum << std::endl;
+    std::cout << "\tFree: " << superBlock.freeINodeNum << std::endl;
+    std::cout << "\tStart position: " << iNodeStartPos << std::endl;
+    // 数据块相关信息
+    std::cout << "Block:" << std::endl;
+    std::cout << "\tSize: " << superBlock.blockSize << std::endl;
+    std::cout << "\tNumber: " << superBlock.blockNum << std::endl;
+    std::cout << "\tFree: " << superBlock.freeBlockNum << std::endl;
+    std::cout << "\tStart position: " << blockStartPos << std::endl;
+}
+
+/**
+ * 打印系统信息
+ */
+void FileSystem::printSystemInfo()
+{
+    // 空出一行
+    std::cout << std::endl;
+    // 打印系统信息
+    std::cout << "System Information:" << std::endl;
+    // 主机名
+    std::cout << "\tHost name: " << hostName << std::endl;
+    // 用户信息
+    std::cout << "User Information:" << std::endl;
+    // 用户名
+    std::cout << "\tUser name: " << userState.userName << std::endl;
+    // 用户组
+    std::cout << "\tUser group: " << userState.userGroup << std::endl;
+    // 是否登录
+    std::cout << "\tLogin: " << (userState.isLogin ? "Yes" : "No") << std::endl;
+    // 当前目录
+    std::cout << "\tCurrent directory: " << currentDirName << std::endl;
+    // 用户主目录
+    std::cout << "\tUser home directory: " << userHomeDir << std::endl;
+}
+
+/**
+ * 打印用户和主机名
+ */
+void FileSystem::printUserAndHostName()
+{
+    std::cout << userState.userName << "@" << hostName << ":";
+}
+
+/**
+ * 清屏
+ */
+void FileSystem::clearScreen()
+{
+    // 如果是windows系统
+#if defined(WIN32) || defined(_WIN32) || defined(_WIN64)
+    system("cls");
+#else
+    system("clear");
+#endif
+}
+
+/*-------------------inode基础操作-------------------*/
+
+/**
+ * 根据dirName和inodeName拼出绝对路径
+ */
+std::string FileSystem::getAbsolutePath(const std::string& dirName, const std::string& INodeName)
+{
+    // 如果INodeName为空或者为"."，那么直接为当前目录
+    if (INodeName.empty() || INodeName == ".")
+    {
+        return dirName;
+    }
+    // 如果为".."，那么需要找到上一个"/"的位置
+    else if (INodeName == "..")
+    {
+        // 如果当前目录为根目录
+        if (dirName == "/")
+        {
+            return "/";
+        }
+        // 找到上一个"/"的位置
+        int pos = dirName.find_last_of('/');
+        // 如果找不到"/"，那么直接返回当前目录
+        if (pos == -1)
+        {
+            std::cerr << "Error: findINodeInDir---No parent directory." << std::endl;
+            return dirName;
+        }
+        // 如果找到了"/"，那么截取字符串
+        return dirName.substr(0, pos);
+    }
+    else
+    {
+        // 如果是根目录
+        if (dirName == "/")
+        {
+            return dirName + INodeName;
+        }
+        else
+        {
+            return dirName + "/" + INodeName;
+        }
+    }
 }
 
 /**
@@ -300,582 +912,381 @@ bool FileSystem::freeBlock(int blockAddr)
 }
 
 /**
- * 格式化文件系统
- * @return 是否格式化文件系统成功
+ * 查找缓存中的inode
+ * @param absolutePath
+ * @param type inode类型
  */
-bool FileSystem::formatFileSystem()
+INode* FileSystem::findINodeInCache(const std::string& absolutePath, int type)
 {
-    /*-------------------初始化超级块-------------------*/
-    // 设置超级块大小
-    superBlock.superBlockSize = sizeof(SuperBlock);
-    // 设置inode相关
-    superBlock.iNodeSize = sizeof(INode);
-    superBlock.iNodeNum = MAX_INODE_NUM;
-    superBlock.freeINodeNum = MAX_INODE_NUM;
-    // 设置数据块相关
-    superBlock.blockSize = BLOCK_SIZE;
-    superBlock.blockNum = BLOCK_NUM;
-    superBlock.freeBlockNum = BLOCK_NUM;
-    // 设置inode位图和数据块位图的起始位置
-    superBlock.iNodeBitmapPos = iNodeBitmapStartPos;
-    superBlock.blockBitmapPos = blockBitmapStartPos;
-    // 设置inode节点的起始位置
-    superBlock.iNodeStartPos = iNodeStartPos;
-    // 设置数据块的起始位置
-    superBlock.blockStartPos = blockStartPos;
-    // 设置每个块组的块数
-    superBlock.blockGroupSize = BLOCK_GROUP_SIZE;
-    // 设置空闲块堆栈栈顶为第一块BLOCK
-    superBlock.freeBlockAddr = blockStartPos;
-    // 设置超级块位置
-    superBlock.superBlockPos = superBlockStartPos;
-
-    /*-------------------初始化inode位图-------------------*/
-    // 初始化inode位图
-    iNodeBitmap.reset();
-    // 初始化文件内容中的inode位图
-    fw.seekp(iNodeBitmapStartPos, std::ios::beg);
-    fw.write(reinterpret_cast<char*>(&iNodeBitmap), sizeof(iNodeBitmap));
-
-    /*-------------------初始化数据块位图-------------------*/
-    // 初始化数据块位图
-    blockBitmap.reset();
-    // 初始化文件内容中的数据块位图
-    fw.seekp(blockBitmapStartPos, std::ios::beg);
-    fw.write(reinterpret_cast<char*>(&blockBitmap), sizeof(blockBitmap));
-
-    /*-------------------
-     * 初始化Block，将空闲栈进行初始化
-     * 初始化空闲块堆栈，从最后一个组开始将数据区按扇区分组，每组的第一个扇区存放下一个组的地址
-     * 每个组大小为 32*512B=16KB
-     *-------------------*/
-    for (int i = BLOCK_NUM / BLOCK_GROUP_SIZE - 1; i >= 0; i--)
+    INode* nextINode = nullptr;
+    // 如果是目录
+    if (type == DIR_TYPE)
     {
-        // 将每个组的第一个扇区存放下一个组的地址
-        if (i == BLOCK_NUM / BLOCK_GROUP_SIZE - 1)
+        // 查找inode
+        nextINode = dirINodeCache.findINodeByFileName(absolutePath);
+        if (nextINode != nullptr)
         {
-            // 最后一个组的第一个扇区存放-1，表示没有下一个组
-            superBlock.freeBlockStack[0] = -1;
+            // 还要再判断一下是否被释放
+            if (!iNodeBitmap[nextINode->iNodeNo])
+            {
+                // 更新缓存
+                dirINodeCache.removeINodeFromCache(absolutePath);
+                // 设置一致性
+                iNodeCacheBitmap[nextINode->iNodeNo] = false;
+                // 而如果是被释放了，那么就返回一个空的INode
+                return nullptr;
+            }
+            // 如果与磁盘不一致，那么就需要更新缓存
+            if (!iNodeCacheBitmap[nextINode->iNodeNo])
+            {
+                // 从磁盘中读取
+                int iNodeAddr = superBlock.iNodeStartPos + nextINode->iNodeNo * superBlock.iNodeSize;
+                fr.seekg(iNodeAddr, std::ios::beg);
+                fr.read(reinterpret_cast<char*>(nextINode), sizeof(INode));
+                // 更新缓存
+                dirINodeCache.addINodeToCache(absolutePath, *nextINode);
+                iNodeCacheBitmap[nextINode->iNodeNo] = true;
+            }
+            return nextINode;
         }
-        else
-        {
-            // 其他组的第一个扇区存放下一个组的地址
-            superBlock.freeBlockStack[0] = blockStartPos + (i + 1) * BLOCK_GROUP_SIZE * BLOCK_SIZE;
-        }
-        // 将每个组的其他扇区存放空闲块
-        for (int j = 1; j < BLOCK_GROUP_SIZE; j++)
-        {
-            superBlock.freeBlockStack[j] = blockStartPos + i * BLOCK_GROUP_SIZE * BLOCK_SIZE + j * BLOCK_SIZE;
-        }
-        // 将组写入文件，首先定位到组的第一个扇区
-        fw.seekp(blockStartPos + i * BLOCK_GROUP_SIZE * BLOCK_SIZE, std::ios::beg);
-        fw.write(reinterpret_cast<char*>(&superBlock.freeBlockStack), sizeof(superBlock.freeBlockStack));
     }
-    // 将超级块写入文件
-    fw.seekp(superBlockStartPos, std::ios::beg);
-    fw.write(reinterpret_cast<char*>(&superBlock), sizeof(SuperBlock));
-
-    // 清空缓冲区
-    fw.flush();
-
-    // 读取位图
-    fr.seekg(iNodeBitmapStartPos, std::ios::beg);
-    fr.read(reinterpret_cast<char*>(&iNodeBitmap), sizeof(iNodeBitmap));
-    fr.seekg(blockBitmapStartPos, std::ios::beg);
-    fr.read(reinterpret_cast<char*>(&blockBitmap), sizeof(blockBitmap));
-
-    /*-------------------初始化目录与INode-------------------*/
-    // 初始化根目录inode
-    INode rootINode{};
-    // 为根目录inode申请inode空间
-    int iNodeAddr = allocateINode();
-    if (iNodeAddr == -1)
+    else if (type == FILE_TYPE)
     {
-        std::cerr << "Error: formatFileSystem---Failed to allocate inode for root directory." << std::endl;
-        return false;
+        // 在FileManager中查找
+        nextINode = fileManager.iNodeCache->findINodeByFileName(absolutePath);
+        if (nextINode != nullptr)
+        {
+            // 还要再判断一下是否被释放
+            if (!iNodeBitmap[nextINode->iNodeNo])
+            {
+                // 更新缓存
+                fileManager.iNodeCache->removeINodeFromCache(absolutePath);
+                iNodeCacheBitmap[nextINode->iNodeNo] = false;
+                // 而如果是被释放了，那么就返回一个空的INode
+                return nullptr;
+            }
+            // 如果与磁盘不一致，那么就需要更新缓存
+            if (!iNodeCacheBitmap[nextINode->iNodeNo])
+            {
+                // 从磁盘中读取
+                int iNodeAddr = superBlock.iNodeStartPos + nextINode->iNodeNo * superBlock.iNodeSize;
+                fr.seekg(iNodeAddr, std::ios::beg);
+                fr.read(reinterpret_cast<char*>(nextINode), sizeof(INode));
+                // 更新缓存
+                fileManager.iNodeCache->addINodeToCache(absolutePath, *nextINode);
+                iNodeCacheBitmap[nextINode->iNodeNo] = true;
+            }
+            return nextINode;
+        }
     }
-    // 为根目录inode申请数据块
-    int blockAddr = allocateBlock();
-    if (blockAddr == -1)
+    return nextINode;
+}
+
+/**
+ * 根据目录INode查找目录下指定的文件/目录INode
+ * @param dirINode 待查找的目录
+ * @param dirName 目录名
+ * @param INodeName 需在目录中查找的项
+ * @param type 类型
+ * @return resINode
+ */
+INode* FileSystem::findINodeInDir(INode& dirINode, const std::string& dirName, const std::string& INodeName,
+                                  int type)
+{
+    // 如果不是目录
+    if (!(dirINode.iNodeMode & DIR_TYPE))
     {
-        std::cerr << "Error: formatFileSystem---Failed to allocate block for root directory." << std::endl;
-        return false;
+        std::cerr << "Error: findINodeInDir---Not a directory." << std::endl;
+        return nullptr;
+    }
+    /* 根据type首先查找缓存 */
+    std::string absolutePath = getAbsolutePath(dirName, INodeName);
+
+    INode* nextINode = findINodeInCache(absolutePath, type);
+    // 如果找到了
+    if (nextINode != nullptr)
+    {
+        return nextINode;
     }
 
-    // 声明一个目录项数组，用于存放根目录的目录项
+    /*-------------------查找目录项-------------------*/
+    // INode已有，直接查找所有目录项
+    // 读取目录项
     DirItem dirItems[16] = {};
-    // 初始化第一个目录项为"."
-    strcpy(dirItems[0].itemName, ".");
-    dirItems[0].iNodeAddr = iNodeAddr;
-    // 将目录写回
-    fw.seekp(blockAddr, std::ios::beg);
-    fw.write(reinterpret_cast<char*>(&dirItems), sizeof(dirItems));
-
-    // 给根目录inode赋值
-    // inode号
-    rootINode.iNodeNum = 0;
-    // 大小
-    rootINode.iNodeSize = superBlock.blockSize;
-    // 时间
-    rootINode.iNodeCreateTime = time(nullptr);
-    rootINode.iNodeModifyTime = time(nullptr);
-    rootINode.iNodeAccessTime = time(nullptr);
-    // 用户名与用户组
-    strcpy(rootINode.iNodeOwner, userState.userName);
-    strcpy(rootINode.iNodeGroup, userState.userGroup);
-    // 链接，目前为1，即初始化时仅链接到当前自己"."
-    rootINode.iNodeLink = 1;
-    // 设置inode数据项
-    rootINode.iNodeBlockPointer[0] = blockAddr;
-    for (int i = 1; i < BLOCK_POINTER_NUM; ++i)
+    int cnt = dirINode.iNodeLink;
+    // 最多查找144个目录项
+    for (int i = 0; i < 144&&i<cnt;)
     {
-        rootINode.iNodeBlockPointer[i] = -1;
-    }
-    // 设置默认权限
-    rootINode.iNodeMode = DIR_TYPE | DEFAULT_DIR_MODE;
-
-    // 写回
-    fw.seekp(iNodeAddr, std::ios::beg);
-    fw.write(reinterpret_cast<char*>(&rootINode), sizeof(INode));
-
-    // 清空缓冲区
-    fw.flush();
-    return true;
-}
-
-/**
- * 初始化文件系统的其他配置
- * @brief 要求用户自己设定的文件系统的其他配置例如密码、用户、组等
- */
-void FileSystem::initSystemConfig()
-{
-}
-
-/**
- * 创建文件系统
- * @param systemName 文件系统名
- */
-void FileSystem::createFileSystem(const std::string& systemName)
-{
-    // 重组文件名，加上后缀
-    std::string filename = systemName + ".vdisk";
-    // 尝试创建文件
-    fw.open(filename, std::ios::out | std::ios::binary);
-    if (!fw.is_open())
-    {
-        std::cerr << "Error: Failed to createFileSystem virtual disk. " << filename << std::endl;
-        return;
-    }
-    // 现在可以打开文件
-    fr.open(filename, std::ios::in | std::ios::binary);
-
-    // 获取主机名
-    getHostName();
-    // 设置根目录inode
-    rootINodeAddr = iNodeStartPos;
-    // 设置当前目录inode
-    currentDir = rootINodeAddr;
-    // 设置当前目录名
-    currentDirName = "/";
-
-    // 格式化文件系统
-    if (formatFileSystem())
-    {
-        std::cout << "File system created successfully." << std::endl;
-    }
-    else
-    {
-        std::cerr << "Error: Failed to createFileSystem file system." << std::endl;
-    }
-
-    // 初始化文件系统的其他配置
-    initSystemConfig();
-
-    // 安装文件系统
-    if (installFileSystem())
-    {
-        std::cout << "File system is installed after created successfully." << std::endl;
-    }
-    else
-    {
-        std::cerr << "Error: Failed to load file system." << std::endl;
-    }
-}
-
-/**
- * 安装文件系统
- * @brief 将虚拟磁盘文件中的信息加载到内存中
- * @return 是否安装文件系统成功
- */
-bool FileSystem::installFileSystem()
-{
-    // 读取超级块
-    fr.seekg(superBlock.superBlockPos, std::ios::beg);
-    fr.read(reinterpret_cast<char*>(&superBlock), sizeof(SuperBlock));
-    if (fr.bad())
-    {
-        std::cerr << "Error: install---Failed to read super block." << std::endl;
-        return false;
-    }
-    // 读取inode位图
-    fr.seekg(superBlock.iNodeBitmapPos, std::ios::beg);
-    fr.read(reinterpret_cast<char*>(&iNodeBitmap), sizeof(iNodeBitmap));
-    if (fr.bad())
-    {
-        std::cerr << "Error: install---Failed to read inode bitmap." << std::endl;
-        return false;
-    }
-    // 读取数据块位图
-    fr.seekg(superBlock.blockBitmapPos, std::ios::beg);
-    fr.read(reinterpret_cast<char*>(&blockBitmap), sizeof(blockBitmap));
-    if (fr.bad())
-    {
-        std::cerr << "Error: install---Failed to read block bitmap." << std::endl;
-        return false;
-    }
-    installed = true;
-    // 初始化INodeCache
-    fileINodeCache = INodeCache(MAX_INODE_CACHE_SIZE);
-    return true;
-}
-
-void FileSystem::uninstall()
-{
-    // 关闭文件
-    fr.close();
-    fw.close();
-    // 重置文件系统
-    installed = false;
-    // 重置用户状态
-    userState = {};
-    // 设置char[] userState.userName 为"root"
-    strcpy(userState.userName, "root");
-    // 设置char[] userState.userGroup 为"root"
-    strcpy(userState.userGroup, "root");
-    // 重置当前目录
-    currentDir = rootINodeAddr;
-    // 重置当前用户主目录
-    userHomeDir = -1;
-    // 重置当前目录名
-    currentDirName = "/";
-    // 重置主机名
-    memset(hostName, 0, sizeof(hostName));
-    // 重置根目录inode节点
-    rootINodeAddr = -1;
-    // 重置superBlock
-    superBlock = {};
-}
-
-/**
- * 保存文件系统
- */
-void FileSystem::save()
-{
-    std::cout << "Saving file system..." << std::endl;
-    // 保存超级块
-    fw.seekp(superBlock.superBlockPos, std::ios::beg);
-    fw.write(reinterpret_cast<char*>(&superBlock), sizeof(SuperBlock));
-    // 保存inode位图
-    fw.seekp(superBlock.iNodeBitmapPos, std::ios::beg);
-    fw.write(reinterpret_cast<char*>(&iNodeBitmap), sizeof(iNodeBitmap));
-    // 保存数据块位图
-    fw.seekp(superBlock.blockBitmapPos, std::ios::beg);
-    fw.write(reinterpret_cast<char*>(&blockBitmap), sizeof(blockBitmap));
-    // 清空缓冲区
-    fw.flush();
-    // printBuffer();
-    std::cout << "File system saved successfully." << std::endl;
-}
-
-/**
- * 打开虚拟磁盘文件
- */
-void FileSystem::load(const std::string& filename)
-{
-    // 首先只读打开文件
-    fr.open(filename, std::ios::in | std::ios::binary);
-    if (!fr.is_open())
-    {
-        std::cerr << "Error: load---Failed to load virtual disk. " << filename << std::endl;
-        return;
-    }
-    // 读取文件
-    fr.read(diskBuffer, diskBlockSize);
-    fr.close();
-    fw.open(filename, std::ios::out | std::ios::binary);
-    if (!fw.is_open())
-    {
-        std::cerr << "Error: load---Failed to load virtual disk. " << filename << std::endl;
-        return;
-    }
-    // 将缓冲区写回
-    fw.write(diskBuffer, diskBlockSize);
-    fw.flush();
-    // 再次读打开文件
-    fr.open(filename, std::ios::in | std::ios::binary);
-    if (!fr.is_open())
-    {
-        std::cerr << "Error: load---Failed to load virtual disk. " << filename << std::endl;
-        return;
-    }
-    // printBuffer();
-    // 获取主机名
-    getHostName();
-    // 设置根目录inode
-    rootINodeAddr = iNodeStartPos;
-    // 设置当前目录inode
-    currentDir = rootINodeAddr;
-    // 设置当前目录名
-    currentDirName = "/";
-
-    // 安装文件系统
-    if (installFileSystem())
-    {
-        std::cout << "File system loaded successfully." << std::endl;
-    }
-    else
-    {
-        std::cerr << "Error: Failed to load file system." << std::endl;
-    }
-}
-
-/**
- * 文件系统内执行命令
- * @param command
- */
-void FileSystem::executeInFS(const std::string& command)
-{
-    std::cout << "Executing command: " << command << std::endl;
-    // 解析命令
-    std::istringstream iss(command);
-    // 解析为数组，前面一个是命令，后面一个是参数
-    std::string args[2];
-    iss >> args[0] >> args[1];
-    // 将剩余命令参数也读取出来
-    std::string temp;
-    while (iss >> temp)
-    {
-        args[1] += " " + temp;
-    }
-    // 如果参数[0]为"help"或者参数[1]为"--help"
-    if (args[0] == "help" || args[1] == "--help")
-    {
-        Helper::showHelpInformation(args[0]);
-    }
-    // 判断命令
-    // 如果是pwd命令
-    if (args[0] == "pwd")
-    {
-        std::cout << currentDirName << std::endl;
-    }
-    // 如果是super命令
-    else if (args[0] == "super")
-    {
-        printSuperBlock();
-    }
-    // 如果是info命令
-    else if (args[0] == "info")
-    {
-        printSystemInfo();
-    }
-    // 格式化文件系统
-    else if (args[0] == "format")
-    {
-        formatFileSystem();
-    }
-    // 如果是cd命令
-    else if (args[0] == "cd")
-    {
-        int iNodeAddr = currentDir;
-        std::string temp = currentDirName;
-        if (!changeDir(args[1], currentDir, currentDirName))
+        // 如果直接块指针为空，那么直接跳过
+        if (dirINode.iNodeBlockPointer[i / 16] == -1)
         {
-            currentDir = iNodeAddr;
-            currentDirName = temp;
+            i += 16;
+            continue;
         }
+        // 读取目录项
+        int dirItemBlockAddr = dirINode.iNodeBlockPointer[i / 16];
+        fr.seekg(dirItemBlockAddr, std::ios::beg);
+        fr.read(reinterpret_cast<char*>(&dirItems), sizeof(dirItems));
+        // 遍历目录项
+        for (int j = 0; j < 16; j++)
+        {
+            // 如果目录项为空，那么直接跳过
+            if (dirItems[j].iNodeAddr == -1)
+            {
+                continue;
+            }
+            // 如果找到了目录项
+            if (strcmp(dirItems[j].itemName, INodeName.c_str()) == 0)
+            {
+                // 判断与type是否匹配
+                auto resINode = new INode();
+                fr.seekg(dirItems[j].iNodeAddr, std::ios::beg);
+                fr.read(reinterpret_cast<char*>(resINode), sizeof(INode));
+                if ((resINode->iNodeMode & type) == type)
+                {
+                    // 将找到的INode加入缓存
+                    if (type == DIR_TYPE)
+                    {
+                        dirINodeCache.addINodeToCache(absolutePath, *resINode);
+                        iNodeCacheBitmap[resINode->iNodeNo] = true;
+                    }
+                    else if (type == FILE_TYPE)
+                    {
+                        fileManager.iNodeCache->addINodeToCache(absolutePath, *resINode);
+                        iNodeCacheBitmap[resINode->iNodeNo] = true;
+                    }
+                    return resINode;
+                }
+                else
+                {
+                    std::cerr << "Error: findINodeInDir---Not a " << (type == DIR_TYPE ? "directory." : "file.") << std::endl;
+                    return nullptr;
+                }
+            }
+        }
+        i += 16;
     }
-    // 如果是ls命令
-    else if (args[0] == "ls")
+
+    // 如果没有找到
+    return nullptr;
+}
+
+/**
+ * 根据目录INode查找目录下空闲的目录项，附带查看是否有重名目录项
+ * @param dirINode 目录INode
+ * @param itemName 目录项名
+ * @param itemType 目录项类型
+ * @return 空闲目录项 FreeDirItemIndex
+ */
+FreeDirItemIndex FileSystem::findFreeDirItem(const INode& dirINode, const std::string& itemName, int itemType)
+{
+    int accessPermission = calculatePermission(dirINode);
+    // 如果不是目录
+    if (!(dirINode.iNodeMode & DIR_TYPE))
     {
-        listDir(args[1]);
+        std::cerr << "Error: findFreeDirItem---Not a directory." << std::endl;
+        return FreeDirItemIndex{-1, -1};
     }
-    // 如果是mkdir命令
-    else if (args[0] == "mkdir")
+    // 如果没有进入权限（不包括root用户），则报错
+    if (((dirINode.iNodeMode >> accessPermission >> 2) & 1) == 0 && strcmp(userState.userName, "root") != 0)
     {
-        makeDir(args[1]);
+        std::cerr << "Error: Permission denied." << std::endl;
+        return FreeDirItemIndex{-1, -1};
     }
-    // 如果是rmdir命令
-    else if (args[0] == "rmdir")
+    // 读取目录项
+    DirItem dirItems[16] = {};
+    bool checkSameName = false;
+    if (itemName != "")
     {
-        removeDir(args[1]);
+        checkSameName = true;
     }
-    // 如果是create命令
-    else if (args[0] == "touch" || args[0] == "createFileSystem")
+    FreeDirItemIndex freeDirItemIndex = {-1, -1};
+    // 最多查找144个目录项
+    for (int i = 0; i < 144;)
     {
-        createFile(args[1]);
+        // 如果直接块指针为空，那么设置为空闲目录项，如果不需要继续检查重名，那么直接返回
+        if (dirINode.iNodeBlockPointer[i / 16] == -1)
+        {
+            // 如果之前没有找到空闲目录项，那么设置为空闲目录项
+            if (freeDirItemIndex.dirItemIndex == -1)
+            {
+                freeDirItemIndex.dirItemIndex = i;
+                freeDirItemIndex.dirItemInnerIndex = 0;
+            }
+            if (!checkSameName)
+            {
+                return freeDirItemIndex;
+            }
+            i += 16;
+            continue;
+        }
+        // 读取目录项
+        int dirItemBlockAddr = dirINode.iNodeBlockPointer[i / 16];
+        fr.seekg(dirItemBlockAddr, std::ios::beg);
+        fr.read(reinterpret_cast<char*>(&dirItems), sizeof(dirItems));
+        // 遍历目录项
+        for (int j = 0; j < 16; j++)
+        {
+            // 如果需要检查重名、重名且类型匹配
+            if (checkSameName && strcmp(dirItems[j].itemName, itemName.c_str()) == 0)
+            {
+                // 如果类型匹配
+                INode tempINode{};
+                fr.seekg(dirItems[j].iNodeAddr, std::ios::beg);
+                fr.read(reinterpret_cast<char*>(&tempINode), sizeof(INode));
+                if ((tempINode.iNodeMode & itemType) == itemType)
+                {
+                    std::cerr << "Error: findFreeDirItem---File or directory already exists." << std::endl;
+                    return FreeDirItemIndex{-1, -1};
+                }
+            }
+            // 如果目录项为空，那么设置为空闲目录项
+            if (dirItems[j].itemName[0] == '\0')
+            {
+                // 如果之前没有找到空闲目录项，那么设置为空闲目录项
+                if (freeDirItemIndex.dirItemIndex == -1)
+                {
+                    freeDirItemIndex.dirItemIndex = i;
+                    freeDirItemIndex.dirItemInnerIndex = j;
+                }
+                // 如果不需要继续检查重名，那么直接返回
+                if (!checkSameName)
+                {
+                    return freeDirItemIndex;
+                }
+            }
+        }
+        i += 16;
     }
-    // 如果是rm命令
-    else if (args[0] == "rm" || args[0] == "delete")
+
+    // TODO:查找一级间接块，一个一级间接块大小为512字节，一个一级间接块可以存放128个目录项
+
+    // 如果没有找到
+    return freeDirItemIndex;
+}
+
+/**
+ * 查找在某个目录INode中空闲的目录项
+ * @param dirINode 目录INode
+ * @return 空闲目录项 FreeDirItemIndex
+ */
+FreeDirItemIndex FileSystem::findFreeDirItem(const INode& dirINode)
+{
+    // 调用重载函数
+    return findFreeDirItem(dirINode, "", -1);
+}
+
+/**
+ * 清空inode下所有数据块
+ * @param iNode inode
+ */
+void FileSystem::clearINodeBlocks(INode& iNode)
+{
+    // 如果是目录
+    if (iNode.iNodeMode & DIR_TYPE)
     {
-        deleteFile(args[1]);
-    }
-    // 如果是cat命令
-    else if (args[0] == "cat" || args[0] == "read")
-    {
-        catFile(args[1]);
-    }
-    // 如果是write命令/append命令
-    else if (args[0] == "write" || args[0] == "append")
-    {
-        echoFile(args[1]);
-    }
-    // 如果是save命令
-    else if (args[0] == "save")
-    {
-        save();
-    }
-    // 如果是open命令
-    else if (args[0] == "openWithFilename")
-    {
-        openWithFilename(args[1]);
-    }
-    // 如果是close命令
-    else if (args[0] == "closeWithFilename")
-    {
-        closeWithFilename(args[1]);
+        // 读取目录项
+        DirItem dirItems[16] = {};
+        // 最多查找144个目录项
+        for (int i = 0; i < 144;)
+        {
+            // 如果直接块指针为空，那么直接跳过
+            if (iNode.iNodeBlockPointer[i / 16] == -1)
+            {
+                i += 16;
+                continue;
+            }
+            // 读取目录项
+            int dirItemBlockAddr = iNode.iNodeBlockPointer[i / 16];
+            fr.seekg(dirItemBlockAddr, std::ios::beg);
+            fr.read(reinterpret_cast<char*>(&dirItems), sizeof(dirItems));
+            // 遍历目录项
+            for (int j = 0; j < 16; j++)
+            {
+                // 如果目录项为空，那么直接跳过
+                if (dirItems[j].iNodeAddr == -1)
+                {
+                    continue;
+                }
+                // 读取目录项对应的inode
+                INode nextINode{};
+                fr.seekg(dirItems[j].iNodeAddr, std::ios::beg);
+                fr.read(reinterpret_cast<char*>(&nextINode), sizeof(INode));
+                // 递归清空
+                clearINodeBlocks(nextINode);
+                // 释放inode
+                freeINode(dirItems[j].iNodeAddr);
+                // 更新目录项
+                dirItems[j].iNodeAddr = -1;
+                // 更新iNode
+                iNode.iNodeLink--;
+            }
+            // 更新目录项
+            fw.seekp(dirItemBlockAddr, std::ios::beg);
+            fw.write(reinterpret_cast<char*>(&dirItems), sizeof(dirItems));
+            // 更新i
+            i += 16;
+        }
+        // 写回inode
+        int iNodeAddr = superBlock.iNodeStartPos + iNode.iNodeNo * superBlock.iNodeSize;
+        fw.seekp(iNodeAddr, std::ios::beg);
+        fw.write(reinterpret_cast<char*>(&iNode), sizeof(INode));
+        fw.flush();
+        // 设置缓存一致性
+        iNodeCacheBitmap[iNode.iNodeNo] = false;
     }
     else
     {
-        // 不识别的命令
-        std::cerr << "Error: Command not found." << std::endl;
+        // 释放数据块
+        for (int i = 0; i < 9; i++)
+        {
+            if (iNode.iNodeBlockPointer[i] != -1)
+            {
+                freeBlock(iNode.iNodeBlockPointer[i]);
+                // 更新inode
+                iNode.iNodeBlockPointer[i] = -1;
+            }
+        }
+        // 释放一级间接块
+        if (iNode.iNodeBlockPointer[9] != -1)
+        {
+            int block[128] = {};
+            fr.seekg(iNode.iNodeBlockPointer[9], std::ios::beg);
+            fr.read(reinterpret_cast<char*>(&block), sizeof(block));
+            for (int i = 0; i < 128; i++)
+            {
+                if (block[i] != -1)
+                {
+                    freeBlock(block[i]);
+                }
+            }
+            freeBlock(iNode.iNodeBlockPointer[9]);
+            // 更新inode
+            iNode.iNodeBlockPointer[9] = -1;
+        }
+        // 释放二级间接块,不考虑先
     }
 }
 
 /**
- * 打印superBlock信息
+ * 计算当前用户对于某个inode的权限移位
+ * @param iNode
+ * @return
  */
-void FileSystem::printSuperBlock()
+int FileSystem::calculatePermission(const INode& iNode)
 {
-    // 空出一行
-    std::cout << std::endl;
-    // 超级块相关信息
-    std::cout << "SuperBlock:" << std::endl;
-    std::cout << "\tSize: " << superBlock.superBlockSize << std::endl;
-    std::cout << "\tStart position: " << superBlock.superBlockPos << std::endl;
-    // 位图
-    std::cout << "Bitmap:" << std::endl;
-    // inode位图,顺带打印inode位图
-    std::cout << "\tInode bitmap start position: " << iNodeBitmapStartPos << std::endl;
-    std::cout << "\tInode bitmap: ";
-    for (int i = 0; i < superBlock.iNodeNum; i++)
+    if (strcmp(userState.userName, iNode.iNodeOwner) == 0)
     {
-        std::cout << iNodeBitmap[i];
+        return 6;
     }
-    std::cout << std::endl;
-    // 数据块位图
-    std::cout << "\tBlock bitmap start position: " << blockBitmapStartPos << std::endl;
-    std::cout << "\tBlock bitmap: ";
-    for (int i = 0; i < superBlock.blockNum; i++)
+    if (strcmp(userState.userGroup, iNode.iNodeGroup) == 0)
     {
-        std::cout << blockBitmap[i];
+        return 3;
     }
-    std::cout << std::endl;
-    // inode相关信息
-    std::cout << "Inode:" << std::endl;
-    std::cout << "\tSize: " << superBlock.iNodeSize << std::endl;
-    std::cout << "\tNumber: " << superBlock.iNodeNum << std::endl;
-    std::cout << "\tFree: " << superBlock.freeINodeNum << std::endl;
-    std::cout << "\tStart position: " << iNodeStartPos << std::endl;
-    // 数据块相关信息
-    std::cout << "Block:" << std::endl;
-    std::cout << "\tSize: " << superBlock.blockSize << std::endl;
-    std::cout << "\tNumber: " << superBlock.blockNum << std::endl;
-    std::cout << "\tFree: " << superBlock.freeBlockNum << std::endl;
-    std::cout << "\tStart position: " << blockStartPos << std::endl;
-}
-
-/**
- * 打印系统信息
- */
-void FileSystem::printSystemInfo()
-{
-    // 空出一行
-    std::cout << std::endl;
-    // 打印系统信息
-    std::cout << "System Information:" << std::endl;
-    // 主机名
-    std::cout << "\tHost name: " << hostName << std::endl;
-    // 用户信息
-    std::cout << "User Information:" << std::endl;
-    // 用户名
-    std::cout << "\tUser name: " << userState.userName << std::endl;
-    // 用户组
-    std::cout << "\tUser group: " << userState.userGroup << std::endl;
-    // 是否登录
-    std::cout << "\tLogin: " << (userState.isLogin ? "Yes" : "No") << std::endl;
-    // 当前目录
-    std::cout << "\tCurrent directory: " << currentDirName << std::endl;
-    // 用户主目录
-    std::cout << "\tUser home directory: " << userHomeDir << std::endl;
-}
-
-/**
- * 打印用户和主机名
- */
-void FileSystem::printUserAndHostName()
-{
-    std::cout << userState.userName << "@" << hostName << ":";
-}
-
-/**
- * 清屏
- */
-void FileSystem::clearScreen()
-{
-    // 如果是windows系统
-#if defined(WIN32) || defined(_WIN32) || defined(_WIN64)
-    system("cls");
-#else
-    system("clear");
-#endif
+    return 0;
 }
 
 /*-------------------目录操作-------------------*/
-
-/**
- * 根据绝对目录名查缓存切换目录
- * @param arg 目录名
- */
-bool FileSystem::changeDirWithCache(const std::string& absolutePath, int& currentDir, std::string& currentDirName)
-{
-    // 首先直接在dirINodeCache中查找
-    INode* nextINode{};
-    nextINode = dirINodeCache.findINodeByFileName(absolutePath);
-    // 如果在iNodeCache中找到了
-    if (nextINode != nullptr)
-    {
-        // 如果是目录
-        if (nextINode->iNodeMode & DIR_TYPE)
-        {
-            // 如果没有进入权限（不包括root用户），则报错
-            if (((nextINode->iNodeMode >> 6 >> 0) & 1) == 0 && strcmp(userState.userName, "root") != 0)
-            {
-                std::cerr << "Error: Permission denied." << std::endl;
-                return false;
-            }
-            // 更新当前目录inode
-            currentDir = dirINodeCache.findINodeAddrByFileName(absolutePath);
-            // 更新当前目录名
-            currentDirName = absolutePath;
-            return true;
-        }
-        else
-        {
-            std::cerr << "Error: cd---Not a directory." << std::endl;
-            return false;
-        }
-    }
-}
 
 /**
  * 改变当前目录，进入目录
@@ -944,110 +1355,70 @@ bool FileSystem::changeDir(const std::string& arg, int& currentDir, std::string&
     // cnt是目录项数目
     int cnt = currentINode.iNodeLink;
     // 判断当前用户权限
-    int mode;
-    if (strcmp(userState.userName, currentINode.iNodeOwner) == 0)
+    int accessPermission = calculatePermission(currentINode);
+    // 使用findINodeInDir查找目录项
+    INode* nextINode = findINodeInDir(currentINode, currentDirName, dirName, DIR_TYPE);
+    // 如果找到了目录，即nextINode不为空，而不是no为-1
+    if (nextINode != nullptr)
     {
-        mode = 6;
-    }
-    else if (strcmp(userState.userGroup, currentINode.iNodeGroup) == 0)
-    {
-        mode = 3;
-    }
-    else
-    {
-        mode = 0;
-    }
-    // 读取目录项
-    DirItem dirItems[16] = {};
-    // 最多查找144个目录项
-    for (int i = 0; i < 144;)
-    {
-        // 如果直接块指针为空，那么直接跳过
-        if (currentINode.iNodeBlockPointer[i / 16] == -1)
+        // 查验权限
+        if (((nextINode->iNodeMode >> accessPermission >> 2) & 1) == 0 && strcmp(userState.userName, "root") != 0)
         {
-            i += 16;
-            continue;
+            std::cerr << "Error: Permission denied." << std::endl;
+            return false;
         }
-        // 读取目录项
-        int dirItemBlockAddr = currentINode.iNodeBlockPointer[i / 16];
-        fr.seekg(dirItemBlockAddr, std::ios::beg);
-        fr.read(reinterpret_cast<char*>(&dirItems), sizeof(dirItems));
-        // 遍历目录项,每次遍历16个
-        for (const auto& j : dirItems)
+        // 更新当前目录inode
+        currentDir = superBlock.iNodeStartPos + nextINode->iNodeNo * superBlock.iNodeSize;
+        // 更新当前目录名
+        // 更新当前目录名，分情况讨论，如果是"."/".."/"name"
+        if (strcmp(dirName.c_str(), ".") == 0)
         {
-            // 如果目录项的文件名与当前需要查找的目录名相同
-            if (strcmp(j.itemName, dirName.c_str()) == 0)
+            // 不需要改变
+            // currentDirName = currentDirName;
+        }
+        else if (strcmp(dirName.c_str(), "..") == 0)
+        {
+            // 如果是根目录，那么就不变
+            if (currentDirName == "/")
             {
-                // 读取目录项的inode
-                INode nextINode{};
-                fr.seekg(j.iNodeAddr, std::ios::beg);
-                fr.read(reinterpret_cast<char*>(&nextINode), sizeof(INode));
-                // 如果是目录
-                if (nextINode.iNodeMode & DIR_TYPE)
-                {
-                    // 如果没有进入权限（不包括root用户），则报错
-                    if (((nextINode.iNodeMode >> mode >> 0) & 1) == 0 && strcmp(userState.userName, "root") != 0)
-                    {
-                        std::cerr << "Error: Permission denied." << std::endl;
-                        return false;
-                    }
-                    // 更新当前目录inode
-                    currentDir = j.iNodeAddr;
-                    // 更新当前目录名，分情况讨论，如果是"."/".."/"name"
-                    if (strcmp(dirName.c_str(), ".") == 0)
-                    {
-                        // 不需要改变
-                        // currentDirName = currentDirName;
-                    }
-                    else if (strcmp(dirName.c_str(), "..") == 0)
-                    {
-                        // 如果是根目录，那么就不变
-                        if (currentDirName == "/")
-                        {
-                            currentDirName = "/";
-                        }
-                        else
-                        {
-                            // 如果不是根目录，那么就找到上一级目录
-                            int pos = currentDirName.find_last_of('/');
-                            // 如果上级目录是根目录，那么就直接是根目录
-                            if (pos == 0)
-                            {
-                                currentDirName = "/";
-                            }
-                            else
-                            {
-                                // 否则就是上级目录
-                                currentDirName = currentDirName.substr(0, pos);
-                            }
-                        }
-                    }
-                    else
-                    {
-                        // 如果当前目录是根目录，那么就不加"/"
-                        if (currentDirName == "/")
-                        {
-                            currentDirName += dirName;
-                        }
-                        else
-                        {
-                            currentDirName += "/" + dirName;
-                        }
-                    }
-                    // 将当前INode加入缓存
-                    dirINodeCache.addINodeToCache(currentDirName, currentDir, nextINode);
-                    // 如果剩余路径不为空，那么继续递归
-                    if (!remainPath.empty())
-                    {
-                        return changeDir(remainPath, currentDir, currentDirName);
-                    }
-                    return true;
-                }
-                // 如果是文件，则继续查找下一项
+                currentDirName = "/";
             }
-            i++; // 找完本次目录项
+            else
+            {
+                // 如果不是根目录，那么就找到上一级目录
+                int pos = currentDirName.find_last_of('/');
+                // 如果上级目录是根目录，那么就直接是根目录
+                if (pos == 0)
+                {
+                    currentDirName = "/";
+                }
+                else
+                {
+                    // 否则就是上级目录
+                    currentDirName = currentDirName.substr(0, pos);
+                }
+            }
         }
+        else
+        {
+            // 如果当前目录是根目录，那么就不加"/"
+            if (currentDirName == "/")
+            {
+                currentDirName += dirName;
+            }
+            else
+            {
+                currentDirName += "/" + dirName;
+            }
+        }
+        // 如果剩余路径不为空，那么继续递归
+        if (!remainPath.empty())
+        {
+            return changeDir(remainPath, currentDir, currentDirName);
+        }
+        return true;
     }
+
     // 如果找不到目录项
     std::cerr << "Error: cd---No such directory." << std::endl;
     return false;
@@ -1117,20 +1488,6 @@ bool FileSystem::mkdirHelper(bool pFlag, const std::string& dirName, int inodeAd
     DirItem dirItems[16] = {};
     // 目录项数目，这里仅仅只是表示将要创建一个新的目录项
     int cnt = iNode.iNodeLink+1;
-    // 权限
-    int mode;
-    if (strcmp(userState.userName, iNode.iNodeOwner) == 0)
-    {
-        mode = 6;
-    }
-    else if (strcmp(userState.userGroup, iNode.iNodeGroup) == 0)
-    {
-        mode = 3;
-    }
-    else
-    {
-        mode = 0;
-    }
     /*-------------------遍历目录项获取创建位置-------------------*/
     int emptyDirItemBlockIndex = -1;
     int emptyDirItemIndex = -1;
@@ -1194,8 +1551,9 @@ bool FileSystem::mkdirHelper(bool pFlag, const std::string& dirName, int inodeAd
                     // 如果是目录，那么继续递归
                     if (temp.iNodeMode & DIR_TYPE)
                     {
+                        int mode = calculatePermission(temp);
                         // 如果没有进入权限（不包括root用户），则报错
-                        if (((temp.iNodeMode>>mode>>0)&1)==0 && strcmp(userState.userName, "root") != 0)
+                        if (((temp.iNodeMode>>mode>>2)&1)==0 && strcmp(userState.userName, "root") != 0)
                         {
                             std::cerr << "Error: Permission denied." << std::endl;
                             return false;
@@ -1215,7 +1573,7 @@ bool FileSystem::mkdirHelper(bool pFlag, const std::string& dirName, int inodeAd
         }
     }
 
-    // 二级索引 TODO
+    // TODO:二级索引
 
     /*-------------------创建目录项-------------------*/
     // 如果不是最后一个目录，而且pFlag为false，那么报错
@@ -1250,7 +1608,7 @@ bool FileSystem::mkdirHelper(bool pFlag, const std::string& dirName, int inodeAd
     // 设置inode
     INode newINode = {};
     // 计算inode编号，inode编号为inode地址减去inode起始地址再除以inode大小
-    newINode.iNodeNum = (newINodeAddr - superBlock.iNodeStartPos) / superBlock.iNodeSize;
+    newINode.iNodeNo = (newINodeAddr - superBlock.iNodeStartPos) / superBlock.iNodeSize;
     // 设置时间
     newINode.iNodeCreateTime = time(nullptr);
     newINode.iNodeModifyTime = time(nullptr);
@@ -1293,6 +1651,8 @@ bool FileSystem::mkdirHelper(bool pFlag, const std::string& dirName, int inodeAd
     // 写回new inode
     fw.seekp(newINodeAddr, std::ios::beg);
     fw.write(reinterpret_cast<char*>(&newINode), sizeof(INode));
+    // 设置new inode缓存一致性为false
+    iNodeCacheBitmap[newINode.iNodeNo] = false;
     // 将当前目录项写回
     fw.seekp(iNode.iNodeBlockPointer[emptyDirItemBlockIndex], std::ios::beg);
     fw.write(reinterpret_cast<char*>(&dirItems), sizeof(dirItems));
@@ -1303,6 +1663,8 @@ bool FileSystem::mkdirHelper(bool pFlag, const std::string& dirName, int inodeAd
     fw.write(reinterpret_cast<char*>(&iNode), sizeof(INode));
     // 清空缓冲区
     fw.flush();
+    // 设置缓存一致性为false
+    iNodeCacheBitmap[iNode.iNodeNo] = false;
     // 如果不是最后一个目录，那么继续递归
     if (!isLastDir)
     {
@@ -1380,7 +1742,7 @@ void FileSystem::makeDir(const std::string& arg)
     }
     else
     {
-        std::cerr << "Error: mkdir---Failed to createFileSystem directory." << std::endl;
+        std::cerr << "Error: mkdir---Failed to create directory." << std::endl;
         std::cerr.flush();
     }
 }
@@ -1445,19 +1807,7 @@ bool FileSystem::rmdirHelper(bool ignore, bool pFlag, const std::string& dirName
     int cnt = iNode.iNodeLink;
     DirItem dirItems[16] = {};
     // 权限
-    int mode;
-    if (strcmp(userState.userName, iNode.iNodeOwner) == 0)
-    {
-        mode = 6;
-    }
-    else if (strcmp(userState.userGroup, iNode.iNodeGroup) == 0)
-    {
-        mode = 3;
-    }
-    else
-    {
-        mode = 0;
-    }
+    int accessPermission = calculatePermission(iNode);
     /*-------------------遍历目录项进行删除-------------------*/
     // 读取目录项，此处仅判断直接块指针
     for (int i = 0; i < cnt && i < 144;)
@@ -1487,7 +1837,7 @@ bool FileSystem::rmdirHelper(bool ignore, bool pFlag, const std::string& dirName
                 if (nextINode.iNodeMode & DIR_TYPE)
                 {
                     // 如果没有写入权限
-                    if ((nextINode.iNodeMode >> mode >> 0 & 1) == 0 && strcmp(userState.userName, "root") != 0)
+                    if ((nextINode.iNodeMode >> accessPermission >> 1 & 1) == 0 && strcmp(userState.userName, "root") != 0)
                     {
                         std::cerr << "Error: Permission denied." << std::endl;
                         return false;
@@ -1533,12 +1883,14 @@ bool FileSystem::rmdirHelper(bool ignore, bool pFlag, const std::string& dirName
                         fw.write(reinterpret_cast<char*>(&iNode), sizeof(INode));
                         // 清空缓冲区
                         fw.flush();
+                        // 设置缓存一致性为false
+                        iNodeCacheBitmap[iNode.iNodeNo] = false;
                         return true;
                     }
                     // 如果不是最后一个目录，那么继续递归
                     if (rmdirHelper(ignore, pFlag, remainPath, dirItems[j].iNodeAddr))
                     {
-                        // 如果此时有pFlag而子目录已经被删除:TODO
+                        // TODO:如果此时有pFlag而子目录已经被删除
                         return true;
                     }
                     return false;
@@ -1613,11 +1965,11 @@ void FileSystem::removeDir(const std::string& arg)
     // 使用mkdirHelper函数递归创建目录
     if (rmdirHelper(ignore, pFlag, dirName, inodeAddr))
     {
-        std::cout << "Directory created successfully." << std::endl;
+        std::cout << "Directory deleted successfully." << std::endl;
     }
     else
     {
-        std::cerr << "Error: rmdir---Failed to createFileSystem directory." << std::endl;
+        std::cerr << "Error: rmdir---Failed to delete directory." << std::endl;
     }
 }
 
@@ -1642,18 +1994,33 @@ void FileSystem::listDir(const std::string& arg)
     {
         args.push_back(temp);
     }
-    // 如果参数为"-l"，那么列出详细信息
-    if (args.size() == 1 && args[0] == "-l")
+    // 如果参数为"-l"，那么设置lsMode为LS_L
+    if (args.size() > 0 && args[0] == "-l")
     {
         lsMode = LS_L;
-        listDirByINode(currentDir, lsMode);
     }
-    // 如果带其他路径，暂时不支持
+    // 如果后面还有参数（大于1），那么最后一个参数为目录名
+    if (args.size() > 1)
+    {
+        // 获取目录inode地址
+        std::string dirName = args[args.size() - 1];
+        int inodeAddr = currentDir;
+        std::string inodePath = currentDirName;
+        // 使用changeDir函数获取目录inode地址
+        // 使用changeDir函数获取目录inode地址
+        if (!changeDir(dirName, inodeAddr, inodePath))
+        {
+            std::cerr << "Error: ls---No such directory." << std::endl;
+            return;
+        }
+        listDirByINode(inodeAddr, lsMode);
+    }
     else
     {
-        std::cerr << "Error: ls---Invalid argument." << std::endl;
-        return;
+        // 如果目录名为空，那么列出当前目录
+        listDirByINode(currentDir, lsMode);
     }
+
 }
 
 /**
@@ -1673,21 +2040,9 @@ void FileSystem::listDirByINode(int inodeAddr, int lsMode)
     int cnt = iNode.iNodeLink;
     // 判断文件模式
     // 判断当前用户权限
-    int mode;
-    if (strcmp(userState.userName, iNode.iNodeOwner) == 0)
-    {
-        mode = 6;
-    }
-    else if (strcmp(userState.userGroup, iNode.iNodeGroup) == 0)
-    {
-        mode = 3;
-    }
-    else
-    {
-        mode = 0;
-    }
+    int mode = calculatePermission(iNode);
     // 判断读取权限
-    if (((iNode.iNodeMode>>mode>>2)&1)==0)
+    if (((iNode.iNodeMode >> mode >> 2)&1)==0)
     {
         std::cerr << "Error: ls---Permission denied." << std::endl;
         return;
@@ -1748,7 +2103,7 @@ void FileSystem::listDirByINode(int inodeAddr, int lsMode)
                 std::cout<<" ";
                 // 依次打印inode的用户名、用户组、大小、创建时间、修改时间、访问时间、文件名
                 std::cout<<nextINode.iNodeOwner<<" ";
-                std::cout<<nextINode.iNodeGroup << " ";
+                std::cout << nextINode.iNodeGroup << " ";
                 std::cout << nextINode.iNodeSize << " ";
                 // 时间按照年月日时分秒的格式打印
                 // std::cout<<ctime(&nextINode.iNodeCreateTime)<<" ";
@@ -1777,63 +2132,92 @@ void FileSystem::listDirByINode(int inodeAddr, int lsMode)
  * @param dirAddr 目录地址
  * @param fileName 文件名
  */
-int FileSystem::openFile(std::string& dirName, int dirAddr, std::string& fileName)
+int FileSystem::openFile(std::string& dirName, int dirAddr, std::string& fileName, int mode)
 {
+    // TODO:链接文件
     /*-------------------读取目录项-------------------*/
     // 读取上级目录的inode
     INode dirINode = {};
     fr.seekg(dirAddr, std::ios::beg);
     fr.read(reinterpret_cast<char*>(&dirINode), sizeof(INode));
-    // 读取目录项，找到文件的inode
-    DirItem dirItems[16] = {};
-    int cnt = dirINode.iNodeLink;
-    for (int i = 0; i < cnt && i < 144;)
+    // 找到文件的inode
+    INode* fileINode = findINodeInDir(dirINode, dirName, fileName, FILE_TYPE);
+    // 计算权限
+    int accessPermission = calculatePermission(dirINode);
+    // 如果文件inode地址为-1，那么文件不存在，需要创建
+    if (fileINode == nullptr)
     {
-        // 如果直接块指针为空，那么直接跳过
-        if (dirINode.iNodeBlockPointer[i / 16] == -1)
+        // 如果mode为只读，那么报错
+        if (mode == MODE_R)
         {
-            i += 16;
-            continue;
+            std::cerr << "Error: openWithFilename---Cannot open file not exist." << std::endl;
+            return -1;
         }
-        // 读取目录项
-        int dirItemBlockAddr = dirINode.iNodeBlockPointer[i / 16];
-        fr.seekg(dirItemBlockAddr, std::ios::beg);
-        fr.read(reinterpret_cast<char*>(&dirItems), sizeof(dirItems));
-        // 遍历目录项
-        for (int j = 0; j < 16; j++)
+        // 如果没有写入权限，那么报错
+        if (((dirINode.iNodeMode >> accessPermission >> 1) & 1) == 0)
         {
-            // 如果目录项名称为空，说明这个目录项为空
-            if (dirItems[j].itemName[0] == '\0')
-            {
-                j++;
-                continue;
-            }
-            // 如果目录项名称和文件名相同，那么找到文件
-            if (strcmp(dirItems[j].itemName, fileName.c_str()) == 0)
-            {
-                // 读取文件的inode
-                INode fileINode = {};
-                fr.seekg(dirItems[j].iNodeAddr, std::ios::beg);
-                fr.read(reinterpret_cast<char*>(&fileINode), sizeof(INode));
-                // 如果是目录，那么报错
-                if (fileINode.iNodeMode & DIR_TYPE)
-                {
-                    std::cerr << "Error: openWithFilename---Is a directory." << std::endl;
-                    return -1;
-                }
-                // 如果是文件，那么将inode加入inodeCache
-                int inodeAddr = dirItems[j].iNodeAddr;
-                fileINodeCache.addINodeToCache(dirName + "/" + fileName, inodeAddr, fileINode);
-                return inodeAddr;
-            }
-            i++;
+            std::cerr << "Error: open---Permission denied." << std::endl;
+            return -1;
         }
+        // 创建文件
+        // 空缓冲区
+        // 创建文件
+        bool res = createFileHelper(fileName, dirAddr, nullptr, 0);
+        if (!res)
+        {
+            std::cerr << "Error: openWithFilename---Failed to create file." << std::endl;
+            return -1;
+        }
+        // 重新读取inode
+        fileINode = findINodeInDir(dirINode, dirName, fileName, FILE_TYPE);
     }
-
-    // 二级索引
-
-    // 没找到，报错
-    std::cerr << "Error: openWithFilename---File not found." << std::endl;
+    // 打开文件
+    // 如果mode&MODE_R为真，那么判断是否具有读权限
+    if (mode & MODE_R && ((fileINode->iNodeMode >> accessPermission >> 2) & 1) == 0)
+    {
+        std::cerr << "Error: openWithFilename---Permission denied." << std::endl;
+        return -1;
+    }
+    // 如果mode&MODE_W为真，那么判断是否具有写权限
+    if (mode & MODE_W && ((fileINode->iNodeMode >> accessPermission >> 1) & 1) == 0)
+    {
+        std::cerr << "Error: openWithFilename---Permission denied." << std::endl;
+        return -1;
+    }
+    // 调用FileManger的doOpenFile
+    bool clear = false;
+    std::string absoultePath = getAbsolutePath(dirName, fileName);
+    int fd = fileManager.doOpenFile(*fileINode, absoultePath, mode, clear);
+    if (fd != -1)
+    {
+        // 如果clear为true，那么清空文件
+        if (clear)
+        {
+            clearINodeBlocks(*fileINode);
+            // 再给文件分配一个新的数据块
+            int newBlockAddr = allocateBlock();
+            if (newBlockAddr == -1)
+            {
+                std::cerr << "Error: open---Failed to allocate block." << std::endl;
+                return -1;
+            }
+            // 设置inode的数据块
+            fileINode->iNodeBlockPointer[0] = newBlockAddr;
+            // 设置inode的大小
+            fileINode->iNodeSize = 0;
+            // 写回inode
+            int inodeAddr = fileINode->iNodeNo * superBlock.iNodeSize + superBlock.iNodeStartPos;
+            fw.seekp(inodeAddr, std::ios::beg);
+            fw.write(reinterpret_cast<char*>(fileINode), sizeof(INode));
+            fw.flush();
+            // 设置缓存一致性为false
+            iNodeCacheBitmap[fileINode->iNodeNo] = false;
+        }
+        std::cout << "File opened successfully." << std::endl;
+        return fd;
+    }
+    // 报错
+    std::cerr << "Error: openWithFilename---Failed to openWithFilename file." << std::endl;
     return -1;
 }
 
@@ -1843,7 +2227,7 @@ int FileSystem::openFile(std::string& dirName, int dirAddr, std::string& fileNam
  */
 void FileSystem::openWithFilename(const std::string& arg)
 {
-    // arg: file
+    // arg: file [-m mode] mode为rwa
     // file: 文件名，可为绝对路径或相对路径
     // 首先按照空格分割参数
     std::istringstream iss(arg);
@@ -1854,53 +2238,70 @@ void FileSystem::openWithFilename(const std::string& arg)
         args.push_back(temp);
     }
     // 如果参数为空或者超出范围
-    if (args.empty() || args.size() > 1)
+    if (args.size()!=1&&args.size()!=3)
     {
         std::cerr << "Error: openWithFilename---Invalid argument." << std::endl;
         return;
     }
     // 文件名
     std::string fileName = args[0];
+    int mode = MODE_DEFAULT;
+    // 如果参数数为3
+    if (args.size() == 3)
+    {
+        if (args[1]!="-m")
+        {
+            std::cerr << "Error: openWithFilename---Invalid argument." << std::endl;
+            std::cerr << "Usage: open <file> [-m mode]" << std::endl;
+            std::cerr << "mode: r, w, rw" << std::endl;
+            return;
+        }
+        // 如果有其他字符，那么报错
+        if (args[2].find_first_not_of("rwa") != std::string::npos)
+        {
+            std::cerr << "Error: openWithFilename---Invalid mode." << std::endl;
+            std::cerr << "Usage: open <file> [-m mode]" << std::endl;
+            std::cerr << "mode: r, w, a" << std::endl;
+            return;
+        }
+        // 解析mode，查看mode中是否包含r、w、a，如果有则设置mode
+        if (args[2].find('r') != std::string::npos)
+        {
+            mode |= MODE_R;
+        }
+        if (args[2].find('w') != std::string::npos)
+        {
+            mode |= MODE_W;
+        }
+        if (args[2].find('a') != std::string::npos)
+        {
+            mode |= MODE_A;
+        }
+    }
     // 首先拆分文件名和目录名
     int inodeAddr = currentDir;
     std::string dirName = currentDirName;
+    std::string targetDirName = ".";
     if (fileName.find('/') != std::string::npos)
     {
         int pos = fileName.find_last_of('/');
-        dirName = fileName.substr(0, pos);
+        targetDirName = fileName.substr(0, pos);
         fileName = fileName.substr(pos + 1);
     }
-    else
-    {
-        dirName = ".";
-    }
-    // 拼出文件的绝对路径，然后用changeDirWithCache函数找到文件的inode
-    // 计算绝对路径，如果开头是"/"那么不用更改，直接为dirName，否则为currentDirName + "/" + dirName
-    std::string absPath;
-    if (dirName.at(0) == '/')
-    {
-        absPath = dirName;
-    }
-    else
-    {
-        absPath = currentDirName + "/" + dirName;
-    }
-    bool flag = changeDirWithCache(absPath, inodeAddr, dirName);
 
-    // 使用changeDir函数找到文件的inode，并切换到文件所在目录
-    if (flag || changeDir(dirName, inodeAddr, dirName))
+    // 使用changeDir_函数找到文件的inode，并切换到文件所在目录
+    if (changeDir(targetDirName, inodeAddr, dirName))
     {
         // 打开文件
-        int fileINodeAddr = openFile(dirName, inodeAddr, fileName);
-        if (fileINodeAddr != -1)
+        int fd = openFile(dirName, inodeAddr, fileName, mode);
+        if (fd != -1)
         {
-            std::cout << "File opened successfully." << std::endl;
-            std::cout << "File inode address: " << fileINodeAddr << std::endl;
+            std::cout << "File descriptor: " << fd << std::endl;
             return;
         }
         else
         {
-            std::cerr << "Error: openWithFilename---Failed to openWithFilename file." << std::endl;
+            std::cerr << "Error: openWithFilename---Failed to open file." << std::endl;
             return;
         }
     }
@@ -1912,14 +2313,32 @@ void FileSystem::openWithFilename(const std::string& arg)
 }
 
 /**
- * 关闭文件
- * @brief 解析文件绝对路径，然后将其从inodeCache中删除
+ * 关闭文件——使用文件描述符
+ * @param fd 文件描述符
+ */
+bool FileSystem::closeWithFd(int fd)
+{
+    // 调用FileManger的doCloseFile
+    if (fileManager.doCloseFile(fd))
+    {
+        std::cout << "File closed successfully." << std::endl;
+        return true;
+    }
+    else
+    {
+        std::cerr << "Error: closeWithFd---Failed to closeWithFd file." << std::endl;
+        return false;
+    }
+}
+
+/**
+ * 按照文件描述符关闭文件
+ * @brief 解析close命令，关闭文件
  * @param arg close命令参数
  */
-void FileSystem::closeWithFilename(const std::string& arg)
+void FileSystem::closeFile(const std::string& arg)
 {
-    // arg: file
-    // file: 文件名，可为绝对路径或相对路径
+    // close fd
     // 首先按照空格分割参数
     std::istringstream iss(arg);
     std::string temp;
@@ -1929,90 +2348,82 @@ void FileSystem::closeWithFilename(const std::string& arg)
         args.push_back(temp);
     }
     // 如果参数为空或者超出范围
-    if (args.empty() || args.size() > 1)
+    if (args.size() != 1)
     {
-        std::cerr << "Error: closeWithFilename---Invalid argument." << std::endl;
+        std::cerr << "Error: closeWithFd---Invalid argument." << std::endl;
+        std::cerr << "Usage: close <fd>" << std::endl;
         return;
     }
-    // 文件名
-    std::string fileName = args[0];
-    // 首先拆分文件名和目录名
-    int inodeAddr = currentDir;
-    std::string dirName = currentDirName;
-    if (fileName.find('/') != std::string::npos)
+    // 解析文件描述符
+    // 首先判断是否为数字
+    if (args[0].find_first_not_of("0123456789") != std::string::npos)
     {
-        int pos = fileName.find_last_of('/');
-        dirName = fileName.substr(0, pos);
-        fileName = fileName.substr(pos + 1);
+        std::cerr << "Error: close---Invalid file descriptor." << std::endl;
+        return;
     }
-    else
-    {
-        dirName = ".";
-    }
-    std::string absPath;
-    if (dirName.at(0) == '/')
-    {
-        absPath = dirName;
-    }
-    else
-    {
-        absPath = currentDirName + "/" + dirName;
-    }
-    bool flag = changeDirWithCache(absPath, inodeAddr, dirName);
+    int fd = std::stoi(args[0]);
+    // 调用closeWithFd函数
+    closeWithFd(fd);
+}
 
-    // 使用changeDir函数找到文件的inode，并切换到文件所在目录
-    if (flag || changeDir(dirName, inodeAddr, dirName))
+/**
+ * 设置文件指针位置——使用文件描述符，解析seek命令
+ */
+void FileSystem::seekWithFd(const std::string& arg)
+{
+    // seek fd offset
+    // 首先按照空格分割参数
+    std::istringstream iss(arg);
+    std::string temp;
+    std::vector<std::string> args;
+    while (iss >> temp)
     {
-        // 从inodeCache中删除文件
-        if (fileINodeCache.removeINodeFromCache(dirName + "/" + fileName))
-        {
-            std::cout << "File closed successfully." << std::endl;
-            return;
-        }
-        else
-        {
-            std::cerr << "Error: closeWithFilename---Failed to closeWithFilename file." << std::endl;
-            return;
-        }
+        args.push_back(temp);
+    }
+    // 如果参数为空或者超出范围
+    if (args.size() != 2)
+    {
+        std::cerr << "Error: seekWithFd---Invalid argument." << std::endl;
+        std::cerr << "Usage: seek <fd> <offset>" << std::endl;
+        return;
+    }
+    // 判断是否可以转换为数字
+    if (args[0].find_first_not_of("0123456789") != std::string::npos || args[1].find_first_not_of("0123456789") != std::string::npos)
+    {
+        std::cerr << "Error: seekWithFd---Invalid argument." << std::endl;
+        std::cerr << "Usage: seek <fd> <offset>" << std::endl;
+        return;
+    }
+    // 解析文件描述符和偏移量
+    int fd = std::stoi(args[0]);
+    int offset = std::stoi(args[1]);
+    // 调用FileManger的doSeekFile
+    if (fileManager.setFdOffset(fd, offset))
+    {
+        std::cout << "File pointer moved successfully." << std::endl;
     }
     else
     {
-        std::cerr << "Error: closeWithFilename---Failed to closeWithFilename file." << std::endl;
-        return;
+        std::cerr << "Error: seekWithFd---Failed to move file pointer." << std::endl;
     }
 }
 
-
 /**
- * 向某个inode中写入内容
- * @param inodeAddr inode地址
+ * 向某个inode对应文件磁盘块写入内容
+ * @param iNode inode
  * @param content 内容
  * @param size 内容大小
  * @param offset 写入偏移量
  */
-bool FileSystem::writeFile(int inodeAddr, const char* content, unsigned int size, unsigned int offset)
+bool FileSystem::sysWriteFile(INode &iNode, const char* content, unsigned int size, unsigned int offset)
 {
-    // 读取inode
-    INode iNode = {};
-    fr.seekg(inodeAddr, std::ios::beg);
-    fr.read(reinterpret_cast<char*>(&iNode), sizeof(INode));
+    // 计算inode地址
+    int inodeAddr = iNode.iNodeNo * superBlock.iNodeSize + superBlock.iNodeStartPos;
     // 判断文件模式
     // 判断当前用户权限
-    int mode;
-    if (strcmp(userState.userName, iNode.iNodeOwner) == 0)
-    {
-        mode = 6;
-    }
-    else if (strcmp(userState.userGroup, iNode.iNodeGroup) == 0)
-    {
-        mode = 3;
-    }
-    else
-    {
-        mode = 0;
-    }
+    int accessPermission = calculatePermission(iNode);
     // 判断写入权限
-    if (((iNode.iNodeMode >> mode >> 1) & 1) == 0)
+    if (((iNode.iNodeMode >> accessPermission >> 1) & 1) == 0)
     {
         std::cerr << "Error: write---Permission denied." << std::endl;
         return false;
@@ -2042,11 +2453,11 @@ bool FileSystem::writeFile(int inodeAddr, const char* content, unsigned int size
     for (int left = size; left > 0;)
     {
         // 超出直接块范围，使用二级索引
-        if (start_block >= 10)
+        if (start_block >= 9)
         {
             //TODO:需要读取索引块，解析索引表，然后依次写入
             // 读取索引块
-            int indexBlockAddr = iNode.iNodeBlockPointer[10];
+            int indexBlockAddr = iNode.iNodeBlockPointer[9];
             if (indexBlockAddr == -1)
             {
                 // 如果索引块为空，那么分配一个数据块
@@ -2066,18 +2477,20 @@ bool FileSystem::writeFile(int inodeAddr, const char* content, unsigned int size
                 fw.seekp(newIndexBlockAddr, std::ios::beg);
                 fw.write(reinterpret_cast<char*>(&indexTable), sizeof(indexTable));
                 fw.flush();
-                iNode.iNodeBlockPointer[10] = newIndexBlockAddr;
+                iNode.iNodeBlockPointer[9] = newIndexBlockAddr;
                 // 写回inode
                 fw.seekp(inodeAddr, std::ios::beg);
                 fw.write(reinterpret_cast<char*>(&iNode), sizeof(INode));
                 fw.flush();
+                // 设置缓存一致性为false
+                iNodeCacheBitmap[iNode.iNodeNo] = false;
                 indexBlockAddr = newIndexBlockAddr;
             }
             // 读取索引表
             int indexTable[128] = {};
             fr.seekg(indexBlockAddr, std::ios::beg);
             fr.read(reinterpret_cast<char*>(&indexTable), sizeof(indexTable));
-            // 重新计算二级磁盘块号TODO
+            // TODO:重新计算二级磁盘块号
         }
         else
         {
@@ -2114,106 +2527,134 @@ bool FileSystem::writeFile(int inodeAddr, const char* content, unsigned int size
     fw.seekp(inodeAddr, std::ios::beg);
     fw.write(reinterpret_cast<char*>(&iNode), sizeof(INode));
     fw.flush();
+    // 设置缓存一致性为false
+    iNodeCacheBitmap[iNode.iNodeNo] = false;
     return true;
+}
+
+/**
+ * 向指定文件描述符对应文件写入内容
+ * @param fd 文件描述符
+ * @param content 内容
+ * @param size 内容大小
+ */
+bool FileSystem::writeWithFd(int fd, const char* content, unsigned int size)
+{
+    // 获取文件描述符
+    FileDescriptor* fileDescriptor = fileManager.getFdItem(fd);
+    // 如果文件描述符为空，那么报错
+    if (fileDescriptor == nullptr)
+    {
+        std::cerr << "Error: writeWithFd---File not opened." << std::endl;
+        return false;
+    }
+    // 判断是否为写入模式
+    if ((fileDescriptor->mode & MODE_W) == 0)
+    {
+        std::cerr << "Error: writeWithFd---File not opened in write mode." << std::endl;
+        return false;
+    }
+    // 根据inode判断当前用户权限
+    INode* iNode = fileDescriptor->iNode;
+    int accessPermission = calculatePermission(*iNode);
+    // 判断写入权限
+    if (((iNode->iNodeMode >> accessPermission >> 1) & 1) == 0)
+    {
+        std::cerr << "Error: writeWithFd---Permission denied." << std::endl;
+        return false;
+    }
+    // 调用sysWriteFile函数写入文件
+    if (sysWriteFile(*iNode, content, size, fileDescriptor->offset))
+    {
+        // 更新文件描述符的偏移量
+        fileManager.setFdOffset(fd, fileDescriptor->offset + size);
+        return true;
+    }
+    return false;
+}
+
+/**
+ * 解析write命令，写入文件
+ * @param arg write命令参数
+ */
+void FileSystem::writeFile(const std::string& arg)
+{
+    // write fd content
+    // 首先按照空格分割参数
+    std::istringstream iss(arg);
+    std::string temp;
+    std::vector<std::string> args;
+    while (iss >> temp)
+    {
+        args.push_back(temp);
+    }
+    // 如果参数为空或者超出范围
+    if (args.size() != 2)
+    {
+        std::cerr << "Error: writeWithFd---Invalid argument." << std::endl;
+        std::cerr << "Usage: write <fd> <content>" << std::endl;
+        return;
+    }
+    // 解析文件描述符
+    // 判断是否可以转换为数字
+    if (args[0].find_first_not_of("0123456789") != std::string::npos)
+    {
+        std::cerr << "Error: writeWithFd---Invalid file descriptor." << std::endl;
+        return;
+    }
+    int fd = std::stoi(args[0]);
+    // 获取写入内容
+    std::string content = args[1];
+    // 调用writeWithFd函数
+    if (writeWithFd(fd, content.c_str(), content.size()))
+    {
+        std::cout << "Write successfully." << std::endl;
+    }
+    else
+    {
+        std::cerr << "Error: writeWithFd---Failed to write." << std::endl;
+    }
 }
 
 /**
  * 创建文件的辅助函数
  * @param fileName 文件名
- * @param inodeAddr inode地址
+ * @param dirINodeAddr inode地址
  * @return 是否创建成功
  */
-bool FileSystem::createFileHelper(const std::string& fileName, int inodeAddr, char* content, unsigned int size)
+bool FileSystem::createFileHelper(const std::string& fileName, int dirINodeAddr, char* content, unsigned int size)
 {
     /*-------------------参数检查-------------------*/
     // 如果文件名为空或者超出长度，那么报错
     if (fileName.empty() || fileName.size() >= MAX_DIRITEM_NAME_LEN)
     {
-        std::cerr << "Error: createFileSystem---Invalid file name." << std::endl;
+        std::cerr << "Error: create---Invalid file name." << std::endl;
         std::cerr.flush();
         return false;
     }
 
-    // 读取inode
+    // 读取目录inode
     INode iNode = {};
-    fr.seekg(inodeAddr, std::ios::beg);
+    fr.seekg(dirINodeAddr, std::ios::beg);
     fr.read(reinterpret_cast<char*>(&iNode), sizeof(INode));
 
     // 读取目录项
     DirItem dirItems[16] = {};
     // 目录项数目，这里仅仅只是表示将要创建一个新的目录项
     int cnt = iNode.iNodeLink + 1;
-    // 权限
-    int mode;
-    if (strcmp(userState.userName, iNode.iNodeOwner) == 0)
-    {
-        mode = 6;
-    }
-    else if (strcmp(userState.userGroup, iNode.iNodeGroup) == 0)
-    {
-        mode = 3;
-    }
-    else
-    {
-        mode = 0;
-    }
     /*-------------------遍历目录项获取创建位置-------------------*/
     int emptyDirItemBlockIndex = -1;
     int emptyDirItemIndex = -1;
-    // 读取目录项，此处仅判断直接块指针
-    for (int i = 0; i < cnt && i < 144;)
-    {
-        int dirBlockNo = i / 16;
-        // 如果直接块指针为空，那么直接跳过
-        if (iNode.iNodeBlockPointer[dirBlockNo] == -1)
-        {
-            // 如果直接块没有被使用，那么记录下来
-            if (emptyDirItemBlockIndex == -1)
-            {
-                emptyDirItemBlockIndex = dirBlockNo;
-                emptyDirItemIndex = 0;
-            }
-            i += 16;
-            continue;
-        }
-        // 读取目录项
-        int dirItemBlockAddr = iNode.iNodeBlockPointer[dirBlockNo];
-        fr.seekg(dirItemBlockAddr, std::ios::beg);
-        fr.read(reinterpret_cast<char*>(&dirItems), sizeof(dirItems));
-        // 遍历目录项
-        for (int j = 0; j < 16; j++)
-        {
-            // 如果目录项已经存在且为文件，那么报错
-            if (strcmp(dirItems[j].itemName, fileName.c_str()) == 0)
-            {
-                // 读入该目录项的inode，判断如果是文件，那么就需要报错
-                INode temp = {};
-                fr.seekg(dirItems[j].iNodeAddr, std::ios::beg);
-                fr.read(reinterpret_cast<char*>(&temp), sizeof(INode));
-                if (!(temp.iNodeMode & DIR_TYPE))
-                {
-                    std::cerr << "Error: createFileSystem---File already exists." << std::endl;
-                    std::cerr.flush();
-                    return false;
-                }
-            }
-            // 判断目录项的文件名是否为空，如果为空，那么就是空目录项，可以使用
-            if (dirItems[j].itemName[0] == '\0' && emptyDirItemBlockIndex == -1)
-            {
-                emptyDirItemBlockIndex = dirBlockNo;
-                emptyDirItemIndex = j;
-            }
-            i++;
-        }
-    }
-
-    // 一、二级索引 TODO
+    // 使用findFreeDirItem函数找到空闲目录项
+    FreeDirItemIndex freeDirItemIndex = findFreeDirItem(iNode, fileName, FILE_TYPE);
+    emptyDirItemBlockIndex = freeDirItemIndex.dirItemIndex;
+    emptyDirItemIndex = freeDirItemIndex.dirItemInnerIndex;
 
     /*-------------------创建目录项-------------------*/
-    // 如果没有空闲目录项，那么报错
+    // 如果没有空闲目录项或者出现重名
     if (emptyDirItemBlockIndex == -1)
     {
-        std::cerr << "Error: createFileSystem---No free directory enrty left on device." << std::endl;
+        std::cerr << "Error: createFile---No free dir item or file already exists." << std::endl;
         std::cerr.flush();
         return false;
     }
@@ -2224,7 +2665,7 @@ bool FileSystem::createFileHelper(const std::string& fileName, int inodeAddr, ch
     int newINodeAddr = allocateINode();
     if (newINodeAddr == -1)
     {
-        std::cerr << "Error: createFileSystem---Failed to allocate inode." << std::endl;
+        std::cerr << "Error: createFile---Failed to allocate inode." << std::endl;
         std::cerr.flush();
         return false;
     }
@@ -2234,7 +2675,7 @@ bool FileSystem::createFileHelper(const std::string& fileName, int inodeAddr, ch
     // 设置inode
     INode newINode = {};
     // 计算inode编号，inode编号为inode地址减去inode起始地址再除以inode大小
-    newINode.iNodeNum = (newINodeAddr - superBlock.iNodeStartPos) / superBlock.iNodeSize;
+    newINode.iNodeNo = (newINodeAddr - superBlock.iNodeStartPos) / superBlock.iNodeSize;
     // 设置时间
     newINode.iNodeCreateTime = time(nullptr);
     newINode.iNodeModifyTime = time(nullptr);
@@ -2256,13 +2697,15 @@ bool FileSystem::createFileHelper(const std::string& fileName, int inodeAddr, ch
     fw.seekp(newINodeAddr, std::ios::beg);
     fw.write(reinterpret_cast<char*>(&newINode), sizeof(INode));
     fw.flush();
+    // 设置缓存一致性为false
+    iNodeCacheBitmap[newINode.iNodeNo] = false;
     // 写入内容
     if (size > 0)
     {
         // 写入文件
-        if (!writeFile(newINodeAddr, content, size, 0))
+        if (!sysWriteFile(newINode, content, size, 0))
         {
-            std::cerr << "Error: createFileSystem---Failed to write file." << std::endl;
+            std::cerr << "Error: create---Failed to write file." << std::endl;
             std::cerr.flush();
             return false;
         }
@@ -2273,7 +2716,7 @@ bool FileSystem::createFileHelper(const std::string& fileName, int inodeAddr, ch
         int newBlockAddr = allocateBlock();
         if (newBlockAddr == -1)
         {
-            std::cerr << "Error: createFileSystem---Failed to allocate block." << std::endl;
+            std::cerr << "Error: create---Failed to allocate block." << std::endl;
             std::cerr.flush();
             return false;
         }
@@ -2286,6 +2729,8 @@ bool FileSystem::createFileHelper(const std::string& fileName, int inodeAddr, ch
         fw.seekp(newINodeAddr, std::ios::beg);
         fw.write(reinterpret_cast<char*>(&newINode), sizeof(INode));
         fw.flush();
+        // 设置缓存一致性为false
+        iNodeCacheBitmap[newINode.iNodeNo] = false;
     }
     // 将当前目录项写回
     fw.seekp(iNode.iNodeBlockPointer[emptyDirItemBlockIndex], std::ios::beg);
@@ -2293,10 +2738,12 @@ bool FileSystem::createFileHelper(const std::string& fileName, int inodeAddr, ch
     // 写回当前inode
     // 更新链接数
     iNode.iNodeLink++;
-    fw.seekp(inodeAddr, std::ios::beg);
+    fw.seekp(dirINodeAddr, std::ios::beg);
     fw.write(reinterpret_cast<char*>(&iNode), sizeof(INode));
     // 清空缓冲区
     fw.flush();
+    // 设置缓存一致性为false
+    iNodeCacheBitmap[iNode.iNodeNo] = false;
     return true;
 }
 
@@ -2319,7 +2766,7 @@ void FileSystem::createFile(const std::string& arg)
     // 如果参数为空或者超出范围
     if (args.empty() || args.size() > 2)
     {
-        std::cerr << "Error: createFileSystem---Invalid argument." << std::endl;
+        std::cerr << "Error: create---Invalid argument." << std::endl;
         return;
     }
     std::string fileName = args[0];
@@ -2334,31 +2781,16 @@ void FileSystem::createFile(const std::string& arg)
     // 设定inode，如果输入的是绝对路径(fileName以/开头)，那么就从根目录开始，否则从当前目录开始
     int inodeAddr = currentDir;
     std::string dirName = currentDirName;
-    // 将filename拆分为文件名和目录名
+    std::string targetDirName = ".";
     if (fileName.find('/') != std::string::npos)
     {
         int pos = fileName.find_last_of('/');
-        dirName = fileName.substr(0, pos);
+        targetDirName = fileName.substr(0, pos);
         fileName = fileName.substr(pos + 1);
     }
-    else
-    {
-        dirName = ".";
-    }
-
-    std::string absPath;
-    if (dirName.at(0) == '/')
-    {
-        absPath = dirName;
-    }
-    else
-    {
-        absPath = currentDirName + "/" + dirName;
-    }
-    bool flag = changeDirWithCache(absPath, inodeAddr, dirName);
 
     // 使用changeDir函数找到文件的inode，并切换到文件所在目录
-    if (flag || changeDir(dirName, inodeAddr, dirName))
+    if (changeDir(targetDirName, inodeAddr, dirName))
     {
         // 创建文件
         if (createFileHelper(fileName, inodeAddr, content, size))
@@ -2367,7 +2799,7 @@ void FileSystem::createFile(const std::string& arg)
         }
         else
         {
-            std::cerr << "Error: createFileSystem---Failed to createFileSystem file." << std::endl;
+            std::cerr << "Error: create---Failed to create file." << std::endl;
         }
     }
 }
@@ -2378,12 +2810,8 @@ void FileSystem::createFile(const std::string& arg)
  * @param offset 起始位置
  * @param size 读取大小
  */
-bool FileSystem::readFile(int inodeAddr, unsigned int offset, unsigned int size, char* content)
+bool FileSystem::sysReadFile(INode &iNode, unsigned int offset, unsigned int size, char* content)
 {
-    // 读取inode
-    INode iNode = {};
-    fr.seekg(inodeAddr, std::ios::beg);
-    fr.read(reinterpret_cast<char*>(&iNode), sizeof(INode));
     // 如果读取大小为0，那么直接返回
     if (size == 0)
     {
@@ -2404,9 +2832,9 @@ bool FileSystem::readFile(int inodeAddr, unsigned int offset, unsigned int size,
     while (left > 0)
     {
         // 超出直接块范围，使用二级索引
-        if (start_block >= 10)
+        if (start_block >= 9)
         {
-            // TODO
+            // TODO:需要读取索引块，解析索引表，然后依次读取
         }
         else // 在直接块中
         {
@@ -2439,6 +2867,98 @@ bool FileSystem::readFile(int inodeAddr, unsigned int offset, unsigned int size,
 }
 
 /**
+ * 读取指定文件描述符的文件内容，读到content中
+ * @param fd 文件描述符
+ * @param content 读取内容
+ * @param size 读取大小
+ */
+bool FileSystem::readWithFd(int fd, char* content, unsigned int size)
+{
+    // 调用FileManger获取文件描述句柄
+    FileDescriptor* fileDescriptor = fileManager.getFdItem(fd);
+    if (fileDescriptor == nullptr)
+    {
+        // 说明文件没有打开
+        std::cerr << "Error: read---File not opened." << std::endl;
+        return false;
+    }
+    // 判断是否为读取模式以及根据对应INode的权限判断是否有读取权限
+    if ((fileDescriptor->mode & MODE_R) == 0)
+    {
+        // 非读取模式
+        std::cerr << "Error: read---This file is not opened in read mode." << std::endl;
+        return false;
+    }
+    // 拿到inode
+    INode* iNode = fileDescriptor->iNode;
+    // 判断读取权限
+    int accessPermission = calculatePermission(*iNode);
+    if (((iNode->iNodeMode >> accessPermission >> 2) & 1) == 0)
+    {
+        std::cerr << "Error: read---Permission denied." << std::endl;
+        return false;
+    }
+    // 读取文件
+    if (!sysReadFile(*iNode, fileDescriptor->offset, size, content))
+    {
+        std::cerr << "Error: read---Failed to read file." << std::endl;
+        return false;
+    }
+    // 更新文件描述符的偏移量
+    fileManager.setFdOffset(fd, fileDescriptor->offset + size);
+    return true;
+}
+
+/**
+ * 解析read命令，读取文件
+ * @param arg read命令参数
+ */
+void FileSystem::readFile(const std::string& arg)
+{
+    // read fd size
+    // 首先按照空格分割参数
+    std::istringstream iss(arg);
+    std::string temp;
+    std::vector<std::string> args;
+    while (iss >> temp)
+    {
+        args.push_back(temp);
+    }
+    // 如果参数为空或者超出范围
+    if (args.size() != 2)
+    {
+        std::cerr << "Error: read---Invalid argument." << std::endl;
+        std::cerr << "Usage: read <fd> <size>" << std::endl;
+        return;
+    }
+    // 解析文件描述符
+    // 判断是否可以转换为数字
+    if (args[0].find_first_not_of("0123456789") != std::string::npos || args[1].find_first_not_of("0123456789") != std::string::npos)
+    {
+        std::cerr << "Error: read---Invalid argument." << std::endl;
+        std::cerr << "Usage: read <fd> <size>" << std::endl;
+        return;
+    }
+    int fd = std::stoi(args[0]);
+    // 解析读取大小
+    unsigned int size = std::stoi(args[1]);
+    // 读取文件
+    char* content = new char[size+1];
+    if (readWithFd(fd, content, size))
+    {
+        // 在最后一位加上'\0'
+        content[size] = '\0';
+        std::cout << "Content: " << content << std::endl;
+        std::cout << "Read file successfully." << std::endl;
+    }
+    else
+    {
+        std::cerr << "Error: read---Failed to read file." << std::endl;
+    }
+    delete[] content;
+}
+
+/**
  * 读取文件
  * @param arg read命令参数
  */
@@ -2464,6 +2984,7 @@ void FileSystem::catFile(const std::string& arg)
     }
     std::string fileName = args[0];
     unsigned int offset = 0, size = 0;
+    bool sized = false;
     // 其他参数 -n size -o offset 需要遍历，找到-n和-o的位置，然后解析size和offset
     for (int i = 1; i < args.size(); ++i)
     {
@@ -2471,7 +2992,14 @@ void FileSystem::catFile(const std::string& arg)
         {
             if (i + 1 < args.size())
             {
+                // 判断是否可以转换为数字
+                if (args[i + 1].find_first_not_of("0123456789") != std::string::npos)
+                {
+                    std::cerr << "Error: read---Invalid argument." << std::endl;
+                    return;
+                }
                 size = std::stoi(args[i + 1]);
+                sized = true;
             }
             else
             {
@@ -2495,143 +3023,50 @@ void FileSystem::catFile(const std::string& arg)
     // 找到文件所在的inode，首先用changeDir函数找到文件所在的上级目录
     int inodeAddr = currentDir;
     std::string dirName = currentDirName;
-    // 将filename拆分为文件名和目录名
+    std::string targetDirName = ".";
     if (fileName.find('/') != std::string::npos)
     {
         int pos = fileName.find_last_of('/');
-        dirName = fileName.substr(0, pos);
+        targetDirName = fileName.substr(0, pos);
         fileName = fileName.substr(pos + 1);
     }
-    else
+    // 使用changeDir函数找到文件的inode，并切换到文件所在目录
+    if (changeDir(targetDirName, inodeAddr, dirName))
     {
-        dirName = ".";
-    }
-    // 在缓存中查找inode
-    // 查找缓存中是否有对应的inode，如果有，那么直接使用
-    int fileINodeAddr = fileINodeCache.findINodeAddrByFileName(dirName + "/" + fileName);
-    if (fileINodeAddr != -1)
-    {
-        // 直接读取文件
-        char* content = new char[size + 1];
-        if (readFile(fileINodeAddr, offset, size, content))
+        // 打开文件
+        int fd = openFile(dirName, inodeAddr, fileName, MODE_R);
+        // 如果没有指定size，那么默认为文件大小-offset
+        if (!sized)
         {
-            // 设置字符串结束符
-            content[size] = '\0';
-            std::cout << content << std::endl;
+            size = fileManager.getFdItem(fd)->iNode->iNodeSize - offset;
+        }
+        if (fd != -1)
+        {
+            // 读取文件
+            char* content = new char[size+1];
+            if (readWithFd(fd, content, size))
+            {
+                // 在最后一位加上'\0'
+                content[size] = '\0';
+                std::cout << "Content: " << content << std::endl;
+                std::cout << "Read file successfully." << std::endl;
+            }
+            else
+            {
+                std::cerr << "Error: read---Failed to read file." << std::endl;
+            }
+            // 关闭文件
+            closeWithFd(fd);
+            delete[] content;
         }
         else
         {
             std::cerr << "Error: read---Failed to read file." << std::endl;
         }
     }
-
-    std::string absPath;
-    if (dirName.at(0) == '/')
+    else // 错误
     {
-        absPath = dirName;
-    }
-    else
-    {
-        absPath = currentDirName + "/" + dirName;
-    }
-    bool flag = changeDirWithCache(absPath, inodeAddr, dirName);
-
-    // 使用changeDir函数找到文件的inode，并切换到文件所在目录
-    if (flag || changeDir(dirName, inodeAddr, dirName))
-    {
-        // 找到之后依次查询目录inode的目录项，找到文件inode
-        INode iNode = {};
-        fr.seekg(inodeAddr, std::ios::beg);
-        fr.read(reinterpret_cast<char*>(&iNode), sizeof(INode));
-        DirItem dirItems[16] = {};
-        int cnt = iNode.iNodeLink;
-        // 权限
-        int mode;
-        if (strcmp(userState.userName, iNode.iNodeOwner) == 0)
-        {
-            mode = 6;
-        }
-        else if (strcmp(userState.userGroup, iNode.iNodeGroup) == 0)
-        {
-            mode = 3;
-        }
-        else
-        {
-            mode = 0;
-        }
-        // 读取目录项，此处仅判断直接块指针
-        for (int i = 0; i < cnt && i < 144;)
-        {
-            int dirBlockNo = i / 16;
-            // 如果直接块指针为空，那么直接跳过
-            if (iNode.iNodeBlockPointer[dirBlockNo] == -1)
-            {
-                i += 16;
-                continue;
-            }
-            // 读取目录项
-            int dirItemBlockAddr = iNode.iNodeBlockPointer[dirBlockNo];
-            fr.seekg(dirItemBlockAddr, std::ios::beg);
-            fr.read(reinterpret_cast<char*>(&dirItems), sizeof(dirItems));
-            // 遍历目录项
-            for (int j = 0; j < 16; j++)
-            {
-                // 如果目录项名称为空，那么直接跳过
-                if (dirItems[j].itemName[0] == '\0')
-                {
-                    j++;
-                    continue;
-                }
-                // 如果目录项名称相同
-                if (strcmp(dirItems[j].itemName, fileName.c_str()) == 0)
-                {
-                    // 读取inode
-                    INode fileINode = {};
-                    fr.seekg(dirItems[j].iNodeAddr, std::ios::beg);
-                    fr.read(reinterpret_cast<char*>(&fileINode), sizeof(INode));
-                    // 判断读取权限
-                    if (((fileINode.iNodeMode >> mode >> 2) & 1) == 0)
-                    {
-                        std::cerr << "Error: read---Permission denied." << std::endl;
-                        return;
-                    }
-                    // 如果是文件
-                    if (!(fileINode.iNodeMode & DIR_TYPE))
-                    {
-                        // 如果size为0，那么读取整个文件
-                        if (size == 0)
-                        {
-                            size = fileINode.iNodeSize;
-                        }
-                        // 读取文件
-                        char* content = new char[size + 1];
-                        if (readFile(dirItems[j].iNodeAddr, offset, size, content))
-                        {
-                            // 设置字符串结束符
-                            content[size] = '\0';
-                            std::cout << content << std::endl;
-                        }
-                        else
-                        {
-                            std::cerr << "Error: read---Failed to read file." << std::endl;
-                        }
-                        delete[] content;
-                        return;
-                    }
-                    else
-                    {
-                        std::cerr << "Error: read---Not a file." << std::endl;
-                        return;
-                    }
-                }
-            }
-        }
-    }
-    else
-    {
-        // 错误
         std::cerr << "Error: read---Failed to find file." << std::endl;
-        std::cerr.flush();
         return;
     }
 }
@@ -2663,38 +3098,16 @@ void FileSystem::deleteFile(const std::string& arg)
     // 找到文件所在的inode，首先用changeDir函数找到文件所在的上级目录
     int inodeAddr = currentDir;
     std::string dirName = currentDirName;
-    // 将filename拆分为文件名和目录名
+    std::string targetDirName = ".";
     if (fileName.find('/') != std::string::npos)
     {
         int pos = fileName.find_last_of('/');
-        dirName = fileName.substr(0, pos);
+        targetDirName = fileName.substr(0, pos);
         fileName = fileName.substr(pos + 1);
     }
-    else
-    {
-        dirName = ".";
-    }
-    // 在缓存中查找inode
-    // 查找缓存中是否有对应的inode，如果有，那么直接使用
-    // 查找缓存中是否有对应的inode，如果有，那么直接使用
-    int fileINodeAddr = fileINodeCache.findINodeAddrByFileName(dirName + "/" + fileName);
-    if (fileINodeAddr != -1)
-    {
-        // 直接删除文件，但是需要注意，如果文件正在被打开，那么不能删除
-    }
-    std::string absPath;
-    if (dirName.at(0) == '/')
-    {
-        absPath = dirName;
-    }
-    else
-    {
-        absPath = currentDirName + "/" + dirName;
-    }
-    bool flag = changeDirWithCache(absPath, inodeAddr, dirName);
 
     // 使用changeDir函数找到文件的inode，并切换到文件所在目录
-    if (flag || changeDir(dirName, inodeAddr, dirName))
+    if (changeDir(targetDirName, inodeAddr, dirName))
     {
         // 找到之后依次查询目录inode的目录项，找到文件inode
         INode iNode = {};
@@ -2733,21 +3146,9 @@ void FileSystem::deleteFile(const std::string& arg)
                     fr.seekg(dirItems[j].iNodeAddr, std::ios::beg);
                     fr.read(reinterpret_cast<char*>(&fileINode), sizeof(INode));
                     // 计算权限
-                    int mode;
-                    if (strcmp(userState.userName, fileINode.iNodeOwner) == 0)
-                    {
-                        mode = 6;
-                    }
-                    else if (strcmp(userState.userGroup, fileINode.iNodeGroup) == 0)
-                    {
-                        mode = 3;
-                    }
-                    else
-                    {
-                        mode = 0;
-                    }
+                    int accessPermission = calculatePermission(fileINode);
                     // 判断读取权限
-                    if (((fileINode.iNodeMode >> mode >> 2) & 1) == 0)
+                    if (((fileINode.iNodeMode >> accessPermission >> 2) & 1) == 0)
                     {
                         std::cerr << "Error: rm---Permission denied." << std::endl;
                         return;
@@ -2758,15 +3159,7 @@ void FileSystem::deleteFile(const std::string& arg)
                         // 释放inode
                         freeINode(dirItems[j].iNodeAddr);
                         // 释放磁盘块
-                        for (int k = 0; k < BLOCK_POINTER_NUM; ++k)
-                        {
-                            if (fileINode.iNodeBlockPointer[k] != -1)
-                            {
-                                // 如果不是一级索引，还需要释放二级索引、三级索引等TODO
-
-                                freeBlock(fileINode.iNodeBlockPointer[k]);
-                            }
-                        }
+                        clearINodeBlocks(fileINode);
                         // 清空目录项
                         dirItems[j].itemName[0] = '\0';
                         dirItems[j].iNodeAddr = -1;
@@ -2780,6 +3173,8 @@ void FileSystem::deleteFile(const std::string& arg)
                         fw.write(reinterpret_cast<char*>(&iNode), sizeof(INode));
                         // 清空缓冲区
                         fw.flush();
+                        // 设置缓存一致性为false
+                        iNodeCacheBitmap[iNode.iNodeNo] = false;
                         std::cout << "File deleted successfully." << std::endl;
                         return;
                     }
@@ -2806,10 +3201,9 @@ void FileSystem::deleteFile(const std::string& arg)
  */
 void FileSystem::echoFile(const std::string& arg)
 {
-    // write [file] [content] [-o offset]
+    // echo [file] [content]
     // file: 文件名，可为绝对路径或相对路径
     // content: 写入内容
-    // offset: 写入偏移量
     // 首先按照空格分割参数
     std::istringstream iss(arg);
     std::string temp;
@@ -2834,6 +3228,14 @@ void FileSystem::echoFile(const std::string& arg)
     {
         if (args[2] == "-o")
         {
+            // 判断是否可以转换为数字
+            if (args[3].find_first_not_of("0123456789") != std::string::npos)
+            {
+                std::cerr << "Error: write---Invalid argument." << std::endl;
+                std::cerr << "Usage: write [file] [content] [offset]" << std::endl;
+                std::cerr.flush();
+                return;
+            }
             offset = std::stoi(args[3]);
         }
         else
@@ -2847,109 +3249,39 @@ void FileSystem::echoFile(const std::string& arg)
     // 找到文件所在的inode，首先用changeDir函数找到文件所在的上级目录
     int inodeAddr = currentDir;
     std::string dirName = currentDirName;
-    // 将filename拆分为文件名和目录名
+    std::string targetDirName = ".";
     if (fileName.find('/') != std::string::npos)
     {
         int pos = fileName.find_last_of('/');
-        dirName = fileName.substr(0, pos);
+        targetDirName = fileName.substr(0, pos);
         fileName = fileName.substr(pos + 1);
     }
-    else
-    {
-        dirName = ".";
-    }
-    std::string absPath;
-    if (dirName.at(0) == '/')
-    {
-        absPath = dirName;
-    }
-    else
-    {
-        absPath = currentDirName + "/" + dirName;
-    }
-    bool flag = changeDirWithCache(absPath, inodeAddr, dirName);
 
     // 使用changeDir函数找到文件的inode，并切换到文件所在目录
-    if (flag || changeDir(dirName, inodeAddr, dirName))
+    if (changeDir(targetDirName, inodeAddr, dirName))
     {
-        // 找到之后依次查询目录inode的目录项，找到文件inode
-        INode iNode = {};
-        fr.seekg(inodeAddr, std::ios::beg);
-        fr.read(reinterpret_cast<char*>(&iNode), sizeof(INode));
-        DirItem dirItems[16] = {};
-        int cnt = iNode.iNodeLink;
-        // 读取目录项，此处仅判断直接块指针
-        for (int i = 0; i < cnt && i < 144;)
+        // 首先打开文件
+        int fd = openFile(dirName, inodeAddr, fileName, MODE_W);
+        if (fd != -1)
         {
-            int dirBlockNo = i / 16;
-            // 如果直接块指针为空，那么直接跳过
-            if (iNode.iNodeBlockPointer[dirBlockNo] == -1)
+            // 写入文件
+            if (writeWithFd(fd, content.c_str(), content.size()))
             {
-                i += 16;
-                continue;
+                std::cout << "Write file successfully." << std::endl;
             }
-            // 读取目录项
-            int dirItemBlockAddr = iNode.iNodeBlockPointer[dirBlockNo];
-            fr.seekg(dirItemBlockAddr, std::ios::beg);
-            fr.read(reinterpret_cast<char*>(&dirItems), sizeof(dirItems));
-            // 遍历目录项
-            for (int j = 0; j < 16; j++)
+            else
             {
-                // 如果目录项名称为空，那么直接跳过
-                if (dirItems[j].itemName[0] == '\0')
-                {
-                    j++;
-                    continue;
-                }
-                // 如果目录项名称相同
-                if (strcmp(dirItems[j].itemName, fileName.c_str()) == 0)
-                {
-                    // 读取inode
-                    INode fileINode = {};
-                    fr.seekg(dirItems[j].iNodeAddr, std::ios::beg);
-                    fr.read(reinterpret_cast<char*>(&fileINode), sizeof(INode));
-                    // 计算权限
-                    int mode;
-                    if (strcmp(userState.userName, fileINode.iNodeOwner) == 0)
-                    {
-                        mode = 6;
-                    }
-                    else if (strcmp(userState.userGroup, fileINode.iNodeGroup) == 0)
-                    {
-                        mode = 3;
-                    }
-                    else
-                    {
-                        mode = 0;
-                    }
-                    // 判断读取权限
-                    if (((fileINode.iNodeMode >> mode >> 1) & 1) == 0)
-                    {
-                        std::cerr << "Error: write---Permission denied." << std::endl;
-                        return;
-                    }
-                    // 如果是文件
-                    if (!(fileINode.iNodeMode & DIR_TYPE))
-                    {
-                        // 写入文件
-                        if (writeFile(dirItems[j].iNodeAddr, content.c_str(), content.size(), offset))
-                        {
-                            std::cout << "File written successfully." << std::endl;
-                            return;
-                        }
-                        else
-                        {
-                            std::cerr << "Error: write---Failed to write file." << std::endl;
-                            return;
-                        }
-                    }
-                }
+                std::cerr << "Error: write---Failed to write file." << std::endl;
             }
+            // 关闭文件
+            closeWithFd(fd);
+            return;
         }
-        // 错误
-        std::cerr << "Error: write---Failed to find file." << std::endl;
-        std::cerr.flush();
-        return;
+        else
+        {
+            std::cerr << "Error: write---Failed to write file." << std::endl;
+            return;
+        }
     }
     // 错误
     std::cerr << "Error: write---Failed to find file." << std::endl;
@@ -3021,19 +3353,9 @@ void FileSystem::vi(const std::string& arg)
 
     // 找到文件所在的inode，首先用changeDir函数找到文件所在的上级目录
     int inodeAddr = currentDir;
-    std::string absPath;
-    if (dirName.at(0) == '/')
-    {
-        absPath = dirName;
-    }
-    else
-    {
-        absPath = currentDirName + "/" + dirName;
-    }
-    bool flag = changeDirWithCache(absPath, inodeAddr, dirName);
 
     // 使用changeDir函数找到文件的inode，并切换到文件所在目录
-    if (flag || changeDir(dirName, inodeAddr, dirName))
+    if (changeDir(dirName, inodeAddr, dirName))
     {
         // 找到之后依次查询目录inode的目录项，找到文件inode
         INode iNode = {};
@@ -3072,21 +3394,9 @@ void FileSystem::vi(const std::string& arg)
                     fr.seekg(dirItems[j].iNodeAddr, std::ios::beg);
                     fr.read(reinterpret_cast<char*>(&fileINode), sizeof(INode));
                     // 计算权限
-                    int mode;
-                    if (strcmp(userState.userName, fileINode.iNodeOwner) == 0)
-                    {
-                        mode = 6;
-                    }
-                    else if (strcmp(userState.userGroup, fileINode.iNodeGroup) == 0)
-                    {
-                        mode = 3;
-                    }
-                    else
-                    {
-                        mode = 0;
-                    }
-                    // 判断读取与写入权限
-                    if (((fileINode.iNodeMode >> mode >> 1) & 1) == 0)
+                    int accessPermission = calculatePermission(fileINode);
+                    // 判断读取权限
+                    if (((fileINode.iNodeMode >> accessPermission >> 2) & 1) == 0)
                     {
                         std::cerr << "Error: vi---Permission denied." << std::endl;
                         return;
@@ -3098,7 +3408,7 @@ void FileSystem::vi(const std::string& arg)
                         // char* content = new char[maxFileSize];
                         // 声明一个9*512字节的文件内容缓冲区，因为vi编辑器最多只能编辑9个直接块
                         char* content = new char[9 * 512];
-                        if (readFile(dirItems[j].iNodeAddr, 0, fileINode.iNodeSize, content))
+                        if (sysReadFile(fileINode, 0, fileINode.iNodeSize, content))
                         {
                             // 设置字符串结束符
                             content[fileINode.iNodeSize] = '\0';

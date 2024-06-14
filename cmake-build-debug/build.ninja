@@ -98,13 +98,6 @@ build src/CMakeFiles/LiFileSystem.dir/FSHelper.cpp.obj: CXX_COMPILER__LiFileSyst
   OBJECT_DIR = src\CMakeFiles\LiFileSystem.dir
   OBJECT_FILE_DIR = src\CMakeFiles\LiFileSystem.dir
 
-build src/CMakeFiles/LiFileSystem.dir/ioTest.cpp.obj: CXX_COMPILER__LiFileSystem_unscanned_Debug D$:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src/ioTest.cpp || cmake_object_order_depends_target_LiFileSystem
-  DEP_FILE = src\CMakeFiles\LiFileSystem.dir\ioTest.cpp.obj.d
-  FLAGS = -g -std=gnu++14 -fdiagnostics-color=always
-  INCLUDES = -ID:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src
-  OBJECT_DIR = src\CMakeFiles\LiFileSystem.dir
-  OBJECT_FILE_DIR = src\CMakeFiles\LiFileSystem.dir
-
 build src/CMakeFiles/LiFileSystem.dir/INodeCache.cpp.obj: CXX_COMPILER__LiFileSystem_unscanned_Debug D$:/RoadToCs/OperatingSystem/bit-OS-lab-2024/lab4/FileSystem/src/INodeCache.cpp || cmake_object_order_depends_target_LiFileSystem
   DEP_FILE = src\CMakeFiles\LiFileSystem.dir\INodeCache.cpp.obj.d
   FLAGS = -g -std=gnu++14 -fdiagnostics-color=always
@@ -127,7 +120,7 @@ build src/CMakeFiles/LiFileSystem.dir/FileManager.cpp.obj: CXX_COMPILER__LiFileS
 #############################################
 # Link the executable src\LiFileSystem.exe
 
-build src/LiFileSystem.exe: CXX_EXECUTABLE_LINKER__LiFileSystem_Debug src/CMakeFiles/LiFileSystem.dir/main.cpp.obj src/CMakeFiles/LiFileSystem.dir/FileSystem.cpp.obj src/CMakeFiles/LiFileSystem.dir/FSHelper.cpp.obj src/CMakeFiles/LiFileSystem.dir/ioTest.cpp.obj src/CMakeFiles/LiFileSystem.dir/INodeCache.cpp.obj src/CMakeFiles/LiFileSystem.dir/FileManager.cpp.obj
+build src/LiFileSystem.exe: CXX_EXECUTABLE_LINKER__LiFileSystem_Debug src/CMakeFiles/LiFileSystem.dir/main.cpp.obj src/CMakeFiles/LiFileSystem.dir/FileSystem.cpp.obj src/CMakeFiles/LiFileSystem.dir/FSHelper.cpp.obj src/CMakeFiles/LiFileSystem.dir/INodeCache.cpp.obj src/CMakeFiles/LiFileSystem.dir/FileManager.cpp.obj
   FLAGS = -g
   LINK_FLAGS = -static-libgcc -static-libstdc++
   LINK_LIBRARIES = -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32

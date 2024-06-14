@@ -16,8 +16,6 @@ struct INodeCacheItem
 {
     // file name， key
     std::string fileName;
-    // inode节点地址， value
-    int iNodeAddr;
     // inode节点， value
     INode iNode;
     // 前一个节点
@@ -56,7 +54,7 @@ public:
     int findINodeAddrByFileName(const std::string& fileName);
 
     // 添加INode节点到缓存
-    bool addINodeToCache(const std::string& fileName, int iNodeAddr, INode iNode);
+    bool addINodeToCache(const std::string& fileName, INode iNode);
 
     // 从缓存中删除INode节点
     bool removeINodeFromCache(const std::string& fileName);

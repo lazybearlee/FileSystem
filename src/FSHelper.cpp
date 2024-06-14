@@ -19,19 +19,28 @@ void Helper::showHelpInformation(const std::string& command)
         // 支持的命令
         std::cout << "Commands:" << std::endl;
         std::cout << "  help [command]  Display help information." << std::endl;
+        std::cout << "About file system:" << std::endl;
         std::cout << "  new [name]      Create file system." << std::endl;
         std::cout << "  sys [name]      Load file system." << std::endl;
         std::cout << "  save            Save file system." << std::endl;
         std::cout << "  exit            Exit file system." << std::endl;
         std::cout << "  clear           Clear screen." << std::endl;
         std::cout << "  super           Print super block." << std::endl;
-        std::cout << "  read [file]     Read file." << std::endl;
-        std::cout << "  write [file]    Write file." << std::endl;
-        std::cout << "  delete [file]   Delete file." << std::endl;
-        std::cout << "  mkdir [-p] [dir]     Make directory." << std::endl;
-        std::cout << "  rmdir [-p] [--ignore-fail-on-non-empty] [dir]     Remove directory." << std::endl;
-        std::cout << "  ls [-l] [dir]   List directory with details." << std::endl;
-        std::cout << "  cd [dir]        Change directory." << std::endl;
+        std::cout << "About file:" << std::endl;
+        std::cout << "  touch file    Create file." << std::endl;
+        std::cout << "  cat file [-n size] [-o offset]     Display file." << std::endl;
+        std::cout << "  echo file content     Write content to file." << std::endl;
+        std::cout << "  open file [-m rwa(could be mixed)]    Open file." << std::endl;
+        std::cout << "  close fd    Close file." << std::endl;
+        std::cout << "  read fd size     Read file." << std::endl;
+        std::cout << "  write file content   Write file." << std::endl;
+        std::cout << "  seek fd offset     Seek file." << std::endl;
+        std::cout << "  delete file   Delete file." << std::endl;
+        std::cout << "About directory:";
+        std::cout << "  mkdir [-p] dir     Make directory." << std::endl;
+        std::cout << "  rmdir [-p] [--ignore-fail-on-non-empty] dir     Remove directory." << std::endl;
+        std::cout << "  ls [-l] dir   List directory with details." << std::endl;
+        std::cout << "  cd dir        Change directory." << std::endl;
         std::cout << "  pwd             Print working directory." << std::endl;
         // TODO: Add more commands
         std::cout << "TODO: Add more commands." << std::endl;
