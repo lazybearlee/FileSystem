@@ -68,6 +68,7 @@ public:
     void load(const std::string &filename);
     void save();
     void executeInFS(const std::string &command);
+    void printINode(const INode& node);
     void printSuperBlock();
     void printSystemInfo();
     void printUserAndHostName();

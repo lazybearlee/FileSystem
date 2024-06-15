@@ -461,17 +461,24 @@ void FileSystem::load(const std::string& filename)
 void FileSystem::executeInFS(const std::string& command)
 {
     std::cout << "Executing command: " << command << std::endl;
-    // 解析命令
-    std::istringstream iss(command);
-    // 解析为数组，前面一个是命令，后面一个是参数
-    std::string args[2];
-    iss >> args[0] >> args[1];
-    // 将剩余命令参数也读取出来
-    std::string temp;
-    while (iss >> temp)
+    // 解析为数组，前面一个是命令，后面一个是参数，仅拆分第一个空格，不采用sstream
+    std::vector<std::string> args;
+    // 首先找到第一个空格
+    int pos = command.find_first_of(' ');
+    // 如果没有空格
+    if (pos == std::string::npos)
     {
-        args[1] += " " + temp;
+        args.push_back(command);
+        // 再加一个空字符串
+        args.emplace_back("");
     }
+    else
+    {
+        // 如果有空格，那么分割
+        args.push_back(command.substr(0, pos));
+        args.push_back(command.substr(pos + 1));
+    }
+
     // 如果参数[0]为"help"或者参数[1]为"--help"
     if (args[0] == "help" || args[1] == "--help")
     {
@@ -579,6 +586,30 @@ void FileSystem::executeInFS(const std::string& command)
         // 不识别的命令
         std::cerr << "Error: Command not found." << std::endl;
     }
+}
+
+/**
+ * 打印inode信息
+ * @param node
+ */
+void FileSystem::printINode(const INode& node)
+{
+    std::cout << "INode:" << std::endl;
+    std::cout << "\tINode number: " << node.iNodeNo << std::endl;
+    std::cout << "\tINode size: " << node.iNodeSize << std::endl;
+    std::cout << "\tINode create time: " << node.iNodeCreateTime << std::endl;
+    std::cout << "\tINode modify time: " << node.iNodeModifyTime << std::endl;
+    std::cout << "\tINode access time: " << node.iNodeAccessTime << std::endl;
+    std::cout << "\tINode owner: " << node.iNodeOwner << std::endl;
+    std::cout << "\tINode group: " << node.iNodeGroup << std::endl;
+    std::cout << "\tINode link: " << node.iNodeLink << std::endl;
+    std::cout << "\tINode mode: " << node.iNodeMode << std::endl;
+    std::cout << "\tINode block pointer: ";
+    for (int i = 0; i < BLOCK_POINTER_NUM; i++)
+    {
+        std::cout << node.iNodeBlockPointer[i] << " ";
+    }
+    std::cout << std::endl;
 }
 
 /**
@@ -772,12 +803,14 @@ bool FileSystem::freeINode(int iNodeAddr)
     INode iNode = {};
     fw.seekp(iNodeAddr, std::ios::beg);
     fw.write(reinterpret_cast<char*>(&iNode), sizeof(INode));
+    fw.flush();
     // 更新inode位图
     iNodeBitmap[iNodeIndex] = false;
     // 更新超级块
     superBlock.freeINodeNum++;
     fw.seekp(superBlockStartPos, std::ios::beg);
     fw.write(reinterpret_cast<char*>(&superBlock), sizeof(SuperBlock));
+    fw.flush();
     // 更新inode位图
     fw.seekp(iNodeBitmapStartPos + iNodeIndex, std::ios::beg);
     bool temp = iNodeBitmap[iNodeIndex];
@@ -1039,7 +1072,7 @@ INode* FileSystem::findINodeInDir(INode& dirINode, const std::string& dirName, c
             if (strcmp(dirItems[j].itemName, INodeName.c_str()) == 0)
             {
                 // 判断与type是否匹配
-                auto resINode = new INode();
+                INode* resINode = new INode();
                 fr.seekg(dirItems[j].iNodeAddr, std::ios::beg);
                 fr.read(reinterpret_cast<char*>(resINode), sizeof(INode));
                 if ((resINode->iNodeMode & type) == type)
@@ -1225,6 +1258,7 @@ void FileSystem::clearINodeBlocks(INode& iNode)
             // 更新目录项
             fw.seekp(dirItemBlockAddr, std::ios::beg);
             fw.write(reinterpret_cast<char*>(&dirItems), sizeof(dirItems));
+            fw.flush();
             // 更新i
             i += 16;
         }
@@ -1639,6 +1673,7 @@ bool FileSystem::mkdirHelper(bool pFlag, const std::string& dirName, int inodeAd
     // 将新目录项写入刚申请的数据块
     fw.seekp(newBlockAddr, std::ios::beg);
     fw.write(reinterpret_cast<char*>(&newDirItems), sizeof(newDirItems));
+    fw.flush();
     // 设置inode数据项
     newINode.iNodeBlockPointer[0] = newBlockAddr;
     // 设置其他数据项为空
@@ -1652,11 +1687,13 @@ bool FileSystem::mkdirHelper(bool pFlag, const std::string& dirName, int inodeAd
     // 写回new inode
     fw.seekp(newINodeAddr, std::ios::beg);
     fw.write(reinterpret_cast<char*>(&newINode), sizeof(INode));
+    fw.flush();
     // 设置new inode缓存一致性为false
     iNodeCacheBitmap[newINode.iNodeNo] = false;
     // 将当前目录项写回
     fw.seekp(iNode.iNodeBlockPointer[emptyDirItemBlockIndex], std::ios::beg);
     fw.write(reinterpret_cast<char*>(&dirItems), sizeof(dirItems));
+    fw.flush();
     // 更新当前inode
     iNode.iNodeLink++;
     // 写回当前inode
@@ -2737,6 +2774,7 @@ bool FileSystem::createFileHelper(const std::string& fileName, int dirINodeAddr,
     // 将当前目录项写回
     fw.seekp(iNode.iNodeBlockPointer[emptyDirItemBlockIndex], std::ios::beg);
     fw.write(reinterpret_cast<char*>(&dirItems), sizeof(dirItems));
+    fw.flush();
     // 写回当前inode
     // 更新链接数
     iNode.iNodeLink++;
@@ -3169,6 +3207,7 @@ void FileSystem::deleteFile(const std::string& arg)
                         // 写回目录项，索引到inode的目录项
                         fw.seekp(dirItemBlockAddr, std::ios::beg);
                         fw.write(reinterpret_cast<char*>(&dirItems), sizeof(dirItems));
+                        fw.flush();
                         // 更新链接数
                         iNode.iNodeLink--;
                         // 写回inode
@@ -3204,51 +3243,22 @@ void FileSystem::deleteFile(const std::string& arg)
  */
 void FileSystem::echoFile(const std::string& arg)
 {
-    // echo [file] [content]
+    // echo content > file
     // file: 文件名，可为绝对路径或相对路径
-    // content: 写入内容
-    // 首先按照空格分割参数
-    std::istringstream iss(arg);
-    std::string temp;
-    std::vector<std::string> args;
-    while (iss >> temp)
+    // content: 写入内容,content中可以包含空格
+    // 按照最后一个空格分割参数，前面'>'前为content，后面为file，content还需要去掉最后一个空格
+    int pos = arg.find_last_of(' ');
+    // 如果没有找到空格或者空格位置小于3或者前一个字符不为'>'
+    if (pos == std::string::npos || pos <= 2 || arg[pos - 1] != '>')
     {
-        args.push_back(temp);
-    }
-    // 如果参数为空或者超出范围
-    if (args.empty() || args.size() > 4)
-    {
-        std::cerr << "Error: write---Invalid argument." << std::endl;
-        std::cerr << "Usage: write [file] [content] [offset]" << std::endl;
-        std::cerr.flush();
+        std::cerr << "Error: echo---Invalid argument." << std::endl;
+        std::cerr << "Usage: echo content > file" << std::endl;
         return;
     }
-    std::string fileName = args[0];
-    std::string content = args[1];
-    unsigned int offset = 0;
-    // 如果有-o参数，那么解析offset
-    if (args.size() == 4)
-    {
-        if (args[2] == "-o")
-        {
-            // 判断是否可以转换为数字
-            if (args[3].find_first_not_of("0123456789") != std::string::npos)
-            {
-                std::cerr << "Error: write---Invalid argument." << std::endl;
-                std::cerr << "Usage: write [file] [content] [offset]" << std::endl;
-                std::cerr.flush();
-                return;
-            }
-            offset = std::stoi(args[3]);
-        }
-        else
-        {
-            std::cerr << "Error: write---Invalid argument." << std::endl;
-            std::cerr << "Usage: write [file] [content] [offset]" << std::endl;
-            std::cerr.flush();
-            return;
-        }
-    }
+    // 获取content和file
+    std::string content = arg.substr(0, pos - 1);
+    std::string fileName = arg.substr(pos + 1);
+
     // 找到文件所在的inode，首先用changeDir函数找到文件所在的上级目录
     int inodeAddr = currentDir;
     std::string dirName = currentDirName;

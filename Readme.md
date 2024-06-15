@@ -90,7 +90,7 @@ cmake -G Ninja ..
 ninja
 ```
 
-编译完成后，可执行文件在`build`目录下。
+编译完成后，可执行文件在`build/src`目录下。
 
 ## 3. 使用流程
 
@@ -247,10 +247,10 @@ cat file1 -n 10 -o 10
 使用以下命令写入文件：
 
 ```shell
-echo file1 "Hello World"
+echo hello > file1
 ```
 
-该命令会向`file1`文件写入`Hello World`。
+该命令会向`file1`文件写入`hello`。
 
 该命令会首先尝试以只写方式打开文件，如果文件不存在则会创建文件。
 而只写模式会清空文件内容，然后写入新内容。
