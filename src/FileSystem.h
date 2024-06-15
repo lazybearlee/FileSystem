@@ -24,7 +24,6 @@
 #define LS_L 1
 
 
-
 /**
  * 用户状态
  */
@@ -43,8 +42,6 @@ struct UserState
     // 用户组ID
     unsigned short userGroupID;
 };
-
-void testIO();
 
 class FileSystem {
 public:

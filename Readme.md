@@ -59,11 +59,15 @@ FileManager.cpp // 文件管理类，提供文件描述符的管理
 
 ### 可执行文件
 
+本系统的可执行文件均存放在bin目录下。
+
 #### Windows
 
 双击可执行程序执行：
 
 ![img.png](img/img.png)
+
+如果无法正常打开，可尝试`LiFileSystem_v2.exe`或者自行在项目目录尝试编译得到可执行文件。
 
 #### Linux
 

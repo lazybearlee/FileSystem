@@ -119,7 +119,8 @@ int main() {
         {
             fs.executeInFS(input);
         }
-        else {
+        else
+        {
             std::cerr << "Error: File system not installed." << std::endl;
         }
     }

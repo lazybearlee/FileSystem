@@ -117,7 +117,7 @@ int FileManager::getFdOffset(const int fd)
  * @param mode 文件打开模式
  * @return 文件描述符
  */
-int FileManager::doOpenFile(INode &iNode, const std::string& fileName, int mode, bool &clear)
+int FileManager::doOpenFile(INode& iNode, const std::string& fileName, int mode, bool& clear)
 {
     // 首先获取一个空闲的文件描述符
     int fd = getFreeFd();

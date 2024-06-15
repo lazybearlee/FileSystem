@@ -5,7 +5,6 @@
 #include <FSHelper.h>
 #include <sstream>
 #include <vector>
-#include <version>
 
 /**
  * 构造函数
@@ -855,7 +854,8 @@ bool FileSystem::freeBlock(int blockAddr)
         return false;
     }
     // 首先判断数据块地址是否合法
-    if (blockAddr < blockStartPos || blockAddr >= blockStartPos + superBlock.blockNum * superBlock.blockSize || (blockAddr - blockStartPos) % BLOCK_SIZE != 0)
+    if (blockAddr < blockStartPos || blockAddr >= blockStartPos + superBlock.blockNum * superBlock.blockSize || (
+        blockAddr - blockStartPos) % BLOCK_SIZE != 0)
     {
         std::cerr << "Error: freeBlock---Invalid block address." << std::endl;
         return false;
@@ -1015,7 +1015,7 @@ INode* FileSystem::findINodeInDir(INode& dirINode, const std::string& dirName, c
     DirItem dirItems[16] = {};
     int cnt = dirINode.iNodeLink;
     // 最多查找144个目录项
-    for (int i = 0; i < 144&&i<cnt;)
+    for (int i = 0; i < 144 && i < cnt;)
     {
         // 如果直接块指针为空，那么直接跳过
         if (dirINode.iNodeBlockPointer[i / 16] == -1)
@@ -1059,7 +1059,8 @@ INode* FileSystem::findINodeInDir(INode& dirINode, const std::string& dirName, c
                 }
                 else
                 {
-                    std::cerr << "Error: findINodeInDir---Not a " << (type == DIR_TYPE ? "directory." : "file.") << std::endl;
+                    std::cerr << "Error: findINodeInDir---Not a " << (type == DIR_TYPE ? "directory." : "file.") <<
+                        std::endl;
                     return nullptr;
                 }
             }
@@ -1553,7 +1554,7 @@ bool FileSystem::mkdirHelper(bool pFlag, const std::string& dirName, int inodeAd
                     {
                         int mode = calculatePermission(temp);
                         // 如果没有进入权限（不包括root用户），则报错
-                        if (((temp.iNodeMode>>mode>>2)&1)==0 && strcmp(userState.userName, "root") != 0)
+                        if (((temp.iNodeMode >> mode >> 2) & 1) == 0 && strcmp(userState.userName, "root") != 0)
                         {
                             std::cerr << "Error: Permission denied." << std::endl;
                             return false;
@@ -2102,7 +2103,7 @@ void FileSystem::listDirByINode(int inodeAddr, int lsMode)
                 }
                 std::cout<<" ";
                 // 依次打印inode的用户名、用户组、大小、创建时间、修改时间、访问时间、文件名
-                std::cout<<nextINode.iNodeOwner<<" ";
+                std::cout << nextINode.iNodeOwner << " ";
                 std::cout << nextINode.iNodeGroup << " ";
                 std::cout << nextINode.iNodeSize << " ";
                 // 时间按照年月日时分秒的格式打印
@@ -2249,7 +2250,7 @@ void FileSystem::openWithFilename(const std::string& arg)
     // 如果参数数为3
     if (args.size() == 3)
     {
-        if (args[1]!="-m")
+        if (args[1] != "-m")
         {
             std::cerr << "Error: openWithFilename---Invalid argument." << std::endl;
             std::cerr << "Usage: open <file> [-m mode]" << std::endl;
@@ -2388,7 +2389,8 @@ void FileSystem::seekWithFd(const std::string& arg)
         return;
     }
     // 判断是否可以转换为数字
-    if (args[0].find_first_not_of("0123456789") != std::string::npos || args[1].find_first_not_of("0123456789") != std::string::npos)
+    if (args[0].find_first_not_of("0123456789") != std::string::npos || args[1].find_first_not_of("0123456789") !=
+        std::string::npos)
     {
         std::cerr << "Error: seekWithFd---Invalid argument." << std::endl;
         std::cerr << "Usage: seek <fd> <offset>" << std::endl;
@@ -2415,7 +2417,7 @@ void FileSystem::seekWithFd(const std::string& arg)
  * @param size 内容大小
  * @param offset 写入偏移量
  */
-bool FileSystem::sysWriteFile(INode &iNode, const char* content, unsigned int size, unsigned int offset)
+bool FileSystem::sysWriteFile(INode& iNode, const char* content, unsigned int size, unsigned int offset)
 {
     // 计算inode地址
     int inodeAddr = iNode.iNodeNo * superBlock.iNodeSize + superBlock.iNodeStartPos;
@@ -2810,7 +2812,7 @@ void FileSystem::createFile(const std::string& arg)
  * @param offset 起始位置
  * @param size 读取大小
  */
-bool FileSystem::sysReadFile(INode &iNode, unsigned int offset, unsigned int size, char* content)
+bool FileSystem::sysReadFile(INode& iNode, unsigned int offset, unsigned int size, char* content)
 {
     // 如果读取大小为0，那么直接返回
     if (size == 0)
@@ -2933,7 +2935,8 @@ void FileSystem::readFile(const std::string& arg)
     }
     // 解析文件描述符
     // 判断是否可以转换为数字
-    if (args[0].find_first_not_of("0123456789") != std::string::npos || args[1].find_first_not_of("0123456789") != std::string::npos)
+    if (args[0].find_first_not_of("0123456789") != std::string::npos || args[1].find_first_not_of("0123456789") !=
+        std::string::npos)
     {
         std::cerr << "Error: read---Invalid argument." << std::endl;
         std::cerr << "Usage: read <fd> <size>" << std::endl;
@@ -2943,7 +2946,7 @@ void FileSystem::readFile(const std::string& arg)
     // 解析读取大小
     unsigned int size = std::stoi(args[1]);
     // 读取文件
-    char* content = new char[size+1];
+    char* content = new char[size + 1];
     if (readWithFd(fd, content, size))
     {
         // 在最后一位加上'\0'
@@ -3043,7 +3046,7 @@ void FileSystem::catFile(const std::string& arg)
         if (fd != -1)
         {
             // 读取文件
-            char* content = new char[size+1];
+            char* content = new char[size + 1];
             if (readWithFd(fd, content, size))
             {
                 // 在最后一位加上'\0'

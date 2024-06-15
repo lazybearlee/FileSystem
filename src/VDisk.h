@@ -103,6 +103,7 @@ const int maxFileSize = 9 * BLOCK_SIZE + BLOCK_SIZE / sizeof(int) * BLOCK_SIZE +
     BLOCK_SIZE / sizeof(int);
 // 虚拟磁盘缓冲区，初始为最大缓冲区大小
 static char diskBuffer[MAX_DISK_SIZE];
+
 /* 数据结构定义 */
 
 /**
