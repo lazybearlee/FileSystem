@@ -92,7 +92,7 @@ int main() {
             }
             fs.createFileSystem(systemName);
         }
-        else if (command == "sys") {
+        else if (command == "sfs") {
             // 如果已经载入文件系统，那么提示
             if (fs.installed)
             {
