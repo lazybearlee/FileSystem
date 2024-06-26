@@ -21,7 +21,7 @@ void Helper::showHelpInformation(const std::string& command)
         std::cout << "  help [command]  Display help information." << std::endl;
         std::cout << "About file system:" << std::endl;
         std::cout << "  new [name]      Create file system." << std::endl;
-        std::cout << "  sys [name]      Load file system." << std::endl;
+        std::cout << "  sfs [name]      Load file system." << std::endl;
         std::cout << "  save            Save file system." << std::endl;
         std::cout << "  exit            Exit file system." << std::endl;
         std::cout << "  clear           Clear screen." << std::endl;
